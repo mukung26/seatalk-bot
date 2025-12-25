@@ -39,7 +39,7 @@ function extractPlainText(raw) {
   return raw.replace(/<at[^>]*>.*?<\/at>/g, '').replace(/@\S+/g, '').trim();
 }
 
-aapp.post('/callback', (req, res) => {
+app.post('/callback', (req, res) => {
   const body = req.body;
   console.log('Incoming payload (raw):', JSON.stringify(body, null, 2));
 
