@@ -34,14 +34,17 @@ async function sendGroupMessage(groupId, text) {
   }
 }
 
-async function sendUserMessage(userId, text) {
+async function sendUserMessage(employeeCode, text) {
   const token = await getAccessToken();
   try {
     const res = await axios.post(
-      'https://openapi.seatalk.io/messaging/v2/bot_chat',
+      'https://openapi.seatalk.io/messaging/v2/single_chat',
       {
-        subscriber_id: userId, // <-- correct field
-        message: { tag: 'text', text: { format: 2, content: text } }
+        employee_code: employeeCode,
+        message: {
+          tag: 'text',
+          text: { format: 2, content: text }
+        }
       },
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -50,6 +53,7 @@ async function sendUserMessage(userId, text) {
     console.error('sendUserMessage error:', err?.response?.status, err?.response?.data || err.message);
   }
 }
+
 
 function normalizeText(raw) {
   if (!raw) return '';
@@ -79,11 +83,11 @@ app.post('/callback', (req, res) => {
       if (eventType === 'message_from_bot_subscriber') {
         const raw = event.message?.text?.content || '';
         const text = normalizeText(raw);
-        console.log('1-on-1 raw:', raw, 'normalized:', text);
         if (text.startsWith('/hello') || text === 'hello') {
-          await sendUserMessage(event.seatalk_id, 'Hello! 👋 This is 1-on-1 reply.');
+          await sendUserMessage(event.employee_code, 'Hello! 👋 This is 1-on-1 reply.');
         }
       }
+
 
       if (eventType === 'new_mentioned_message_received_from_group_chat' || eventType === 'message_received_from_group_chat') {
         const raw = event.message?.text?.plain_text || event.message?.text?.content || '';
