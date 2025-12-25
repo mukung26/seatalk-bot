@@ -34,23 +34,16 @@ async function sendGroupMessage(groupId, text) {
   }
 }
 
-async function sendUserMessage(employeeCode, text) {
+async function getEmployeeProfile(employeeCode) {
   const token = await getAccessToken();
   try {
-    const res = await axios.post(
-      'https://openapi.seatalk.io/messaging/v2/single_chat',
-      {
-        employee_code: employeeCode,
-        message: {
-          tag: 'text',
-          text: { format: 2, content: text }
-        }
-      },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    console.log('sendUserMessage success:', res.data);
+    const res = await axios.get(`https://openapi.seatalk.io/contacts/v2/profile?employee_code=${employeeCode}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return res.data.employees[0];
   } catch (err) {
-    console.error('sendUserMessage error:', err?.response?.status, err?.response?.data || err.message);
+    console.error('getEmployeeProfile error:', err?.response?.status, err?.response?.data || err.message);
+    return null;
   }
 }
 
@@ -84,7 +77,9 @@ app.post('/callback', (req, res) => {
         const raw = event.message?.text?.content || '';
         const text = normalizeText(raw);
         if (text.startsWith('/hello') || text === 'hello') {
-          await sendUserMessage(event.employee_code, 'Hello! 👋 This is 1-on-1 reply.');
+          const profile = await getEmployeeProfile(event.employee_code);
+          const name = profile ? profile.name : event.employee_code;
+          await sendUserMessage(event.employee_code, `Hello ${name}! 👋 This is 1-on-1 reply.`);
         }
       }
 
@@ -94,7 +89,9 @@ app.post('/callback', (req, res) => {
         const text = normalizeText(raw);
         console.log('Group raw:', raw, 'normalized:', text);
         if (text.includes('/hello') || text === 'hello') {
-          await sendGroupMessage(event.group_id, `@${event.employee_code} Hello! 👋`);
+          const profile = await getEmployeeProfile(event.sender.employee_code);
+          const name = profile ? profile.name : event.sender.employee_code;
+          await sendGroupMessage(event.group_id, `Hello ${name}! 👋`);
         }
       }
 
