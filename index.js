@@ -142,15 +142,11 @@ function startCountdown(seconds = 60) {
 
 function scheduleNextReminder() {
   const now = new Date();
-  const nextReminder = new Date(now);
-  nextReminder.setUTCHours(21, 55, 0, 0); // 21:55 UTC = 5:55 AM GMT+8
-  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 55)) {
-    nextReminder.setUTCDate(nextReminder.getUTCDate() + 1);
-  }
+  const nextReminder = new Date(now.getTime() + 2 * 60 * 60 * 1000); // Every 2 hours
   const delay = nextReminder - now;
   const hours = Math.floor(delay / (1000 * 60 * 60));
   const minutes = Math.floor((delay % (1000 * 60 * 60)) / (1000 * 60));
-  console.log(`Next daily reminder scheduled in ${hours} hours and ${minutes} minutes.`);
+  console.log(`Next reminder scheduled in ${hours} hours and ${minutes} minutes.`);
   setTimeout(sendDailyReminder, delay);
   if (delay > 60000) {
     setTimeout(() => startCountdown(), delay - 60000);
