@@ -116,12 +116,12 @@ app.post('/callback', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('SeaTalk bot running on port', PORT));
 
-// Schedule daily reminder at 5:34 AM GMT+8 (which is 21:34 UTC)
+// Schedule daily reminder at 5:39 AM GMT+8 (which is 21:39 UTC)
 function scheduleReminder() {
   const now = new Date();
   const nextReminder = new Date(now);
-  nextReminder.setUTCHours(21, 34, 0, 0); // 21:34 UTC = 5:34 AM GMT+8
-  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 34)) {
+  nextReminder.setUTCHours(21, 39, 0, 0); // 21:39 UTC = 5:39 AM GMT+8
+  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 39)) {
     nextReminder.setUTCDate(nextReminder.getUTCDate() + 1);
   }
   const delay = nextReminder - now;
