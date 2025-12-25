@@ -10,6 +10,9 @@ const APP_ID = process.env.SEATALK_APP_ID;
 const APP_SECRET = process.env.SEATALK_APP_SECRET;
 const SIGNING_SECRET = process.env.SEATALK_SIGNING_SECRET;
 
+// Your group chat ID
+const GROUP_ID = 'NTk0MzI5MTY4NzE2';
+
 // Verify signature
 function verifySignature(rawBody, signature) {
   const hash = crypto.createHmac('sha256', SIGNING_SECRET)
@@ -29,7 +32,7 @@ app.post('/callback', async (req, res) => {
   // Verification challenge
   if (req.body.event_type === 'event_verification') {
     const challenge = req.body.event.seatalk_challenge;
-    return res.json({ seatalk_challenge: challenge }); // SeaTalk expects JSON
+    return res.json({ seatalk_challenge: challenge }); // Must respond with JSON
   }
 
   // Verify signature for normal events
@@ -37,16 +40,12 @@ app.post('/callback', async (req, res) => {
     return res.status(401).send('Invalid signature');
   }
 
-  // Handle group messages
-  if (req.body.event_type === 'new_mentioned_message_received_from_group_chat' ||
-      req.body.event_type === 'message_from_bot_subscriber') {
-    const event = req.body.event;
-    const content = event.message.text?.content || '';
+  // Handle messages
+  const event = req.body.event;
+  const content = event?.message?.text?.content || '';
 
-    // Respond if message is "/hello"
-    if (content.trim() === '/hello') {
-      await sendTextToGroup(event.group_code, 'Hello! I am TEST123. 👋');
-    }
+  if (content.trim() === '/hello') {
+    await sendTextToGroup(GROUP_ID, 'Hello! I am TEST123. 👋');
   }
 
   res.sendStatus(200);
@@ -70,7 +69,7 @@ async function sendTextToGroup(groupId, text) {
       message: {
         tag: 'text',
         text: {
-          format: 1, // 1 = Markdown formatted text
+          format: 1, // Markdown
           content: text
         }
       }
