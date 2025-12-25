@@ -125,6 +125,9 @@ function scheduleReminder() {
     nextReminder.setUTCDate(nextReminder.getUTCDate() + 1);
   }
   const delay = nextReminder - now;
+  const hours = Math.floor(delay / (1000 * 60 * 60));
+  const minutes = Math.floor((delay % (1000 * 60 * 60)) / (1000 * 60));
+  console.log(`Next daily reminder scheduled in ${hours} hours and ${minutes} minutes.`);
   setTimeout(() => {
     sendDailyReminder();
     setInterval(sendDailyReminder, 24 * 60 * 60 * 1000); // Every 24 hours
