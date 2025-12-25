@@ -41,8 +41,8 @@ app.post('/callback', (req, res) => {
   if (req.body.event_type === 'new_mentioned_message_received_from_group_chat') {
     const event = req.body.event;
     const content = event.message.text?.content || '';
-    if (content.toLowerCase().trim() === 'hello @auto bot!') {
-      sendTextToGroup(event.group_code, 'Hello! I am Auto Bot. 👋');
+    if (content.toLowerCase().trim() === 'hello @test123') {
+      sendTextToGroup(event.group_code, 'Hello! I am TEST123. 👋');
     }
   }
 
