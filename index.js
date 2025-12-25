@@ -10,9 +10,6 @@ const APP_ID = process.env.SEATALK_APP_ID;
 const APP_SECRET = process.env.SEATALK_APP_SECRET;
 const SIGNING_SECRET = process.env.SEATALK_SIGNING_SECRET;
 
-// Your group chat ID
-const GROUP_ID = 'NTk0MzI5MTY4NzE2';
-
 // Verify signature
 function verifySignature(rawBody, signature) {
   const hash = crypto.createHmac('sha256', SIGNING_SECRET)
@@ -32,7 +29,7 @@ app.post('/callback', async (req, res) => {
   // Verification challenge
   if (req.body.event_type === 'event_verification') {
     const challenge = req.body.event.seatalk_challenge;
-    return res.json({ seatalk_challenge: challenge }); // Must respond with JSON
+    return res.json({ seatalk_challenge: challenge });
   }
 
   // Verify signature for normal events
@@ -40,12 +37,16 @@ app.post('/callback', async (req, res) => {
     return res.status(401).send('Invalid signature');
   }
 
-  // Handle messages
+  const eventType = req.body.event_type;
   const event = req.body.event;
-  const content = event?.message?.text?.content || '';
 
-  if (content.trim() === '/hello') {
-    await sendTextToGroup(GROUP_ID, 'Hello! I am TEST123. 👋');
+  // Handle Bot Added To Group Chat
+  if (eventType === 'bot_added_to_group_chat') {
+    const groupId = event.group.group_id;
+    const groupName = event.group.group_name;
+
+    // Send greeting message
+    await sendTextToGroup(groupId, `Hello ${groupName}! I am TEST123 🤖. Happy to join the group!`);
   }
 
   res.sendStatus(200);
@@ -69,20 +70,25 @@ async function sendTextToGroup(groupId, text) {
       message: {
         tag: 'text',
         text: {
-          format: 1, // Markdown
+          format: 1, // Markdown formatted
           content: text
         }
       }
     };
 
-    await axios.post('https://openapi.seatalk.io/messaging/v2/group_chat', messageBody, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
+    await axios.post(
+      'https://openapi.seatalk.io/messaging/v2/group_chat',
+      messageBody,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       }
-    });
+    );
+    console.log(`Greeting sent to group ${groupId}`);
   } catch (err) {
-    console.error('Error sending message to group:', err.response?.data || err.message);
+    console.error('Error sending greeting message:', err.response?.data || err.message);
   }
 }
 
