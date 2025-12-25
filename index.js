@@ -116,8 +116,14 @@ app.post('/callback', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('SeaTalk bot running on port', PORT));
 
-// Schedule daily reminder at 5:39 AM GMT+8 (which is 21:39 UTC)
-function scheduleReminder() {
+function startCountdown(seconds = 60) {
+  console.log(`Reminder in ${seconds} seconds`);
+  if (seconds > 0) {
+    setTimeout(() => startCountdown(seconds - 1), 1000);
+  }
+}
+
+function scheduleNextReminder() {
   const now = new Date();
   const nextReminder = new Date(now);
   nextReminder.setUTCHours(21, 39, 0, 0); // 21:39 UTC = 5:39 AM GMT+8
@@ -128,17 +134,23 @@ function scheduleReminder() {
   const hours = Math.floor(delay / (1000 * 60 * 60));
   const minutes = Math.floor((delay % (1000 * 60 * 60)) / (1000 * 60));
   console.log(`Next daily reminder scheduled in ${hours} hours and ${minutes} minutes.`);
-  setTimeout(() => {
-    sendDailyReminder();
-    setInterval(sendDailyReminder, 24 * 60 * 60 * 1000); // Every 24 hours
-  }, delay);
+  setTimeout(sendDailyReminder, delay);
+  if (delay > 60000) {
+    setTimeout(() => startCountdown(), delay - 60000);
+  } else {
+    startCountdown(Math.floor(delay / 1000));
+  }
 }
 
 async function sendDailyReminder() {
   const message = "Don't forget to fill up the IT Sheet form.";
+  console.log(`Sending daily reminder to ${groupIds.length} groups:`, groupIds);
   for (const groupId of groupIds) {
     await sendGroupMessage(groupId, message);
   }
+  // Schedule the next one
+  scheduleNextReminder();
 }
 
-scheduleReminder();
+// Initial schedule
+scheduleNextReminder();
