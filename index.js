@@ -36,6 +36,26 @@ async function sendGroupMessage(groupId, text) {
   }
 }
 
+async function sendUserMessage(employeeCode, text) {
+  const token = await getAccessToken();
+  try {
+    const res = await axios.post(
+      'https://openapi.seatalk.io/messaging/v2/single_chat',
+      {
+        employee_code: employeeCode,
+        message: {
+          tag: 'text',
+          text: { format: 2, content: text }
+        }
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    console.log('sendUserMessage success:', res.data);
+  } catch (err) {
+    console.error('sendUserMessage error:', err?.response?.status, err?.response?.data || err.message);
+  }
+}
+
 async function getJoinedGroups() {
   const token = await getAccessToken();
   try {
@@ -123,8 +143,8 @@ function startCountdown(seconds = 60) {
 function scheduleNextReminder() {
   const now = new Date();
   const nextReminder = new Date(now);
-  nextReminder.setUTCHours(21, 50, 0, 0); // 21:50 UTC = 5:50 AM GMT+8
-  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 50)) {
+  nextReminder.setUTCHours(21, 55, 0, 0); // 21:55 UTC = 5:55 AM GMT+8
+  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 55)) {
     nextReminder.setUTCDate(nextReminder.getUTCDate() + 1);
   }
   const delay = nextReminder - now;
