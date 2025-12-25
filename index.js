@@ -30,21 +30,21 @@ app.get('/healthz', (req, res) => res.send('OK'));
 // Webhook endpoint for Seatalk
 app.post('/callback', async (req, res) => {
   try {
+    // Respond to SeaTalk verification challenge first
+    if (req.body.seatalk_challenge) {
+      return res.send(req.body.seatalk_challenge);
+    }
+
+    // Verify signature for normal events
     if (!verifySignature(req)) return res.status(401).send('Invalid signature');
 
     const payload = req.body;
-
-    // Handle verification challenge
-    if (payload.event_type === 'event_verification') {
-      return res.json(payload.event);
-    }
 
     // Handle group messages
     if (payload.event_type === 'group_message') {
       const event = payload.event;
       const content = event.message.text?.content || '';
 
-      // Match "hello @Auto Bot!" (case-insensitive)
       if (content.toLowerCase().trim() === 'hello @auto bot!') {
         await sendTextToGroup(event.group_code, 'Hello! I am Auto Bot. 👋');
       }
@@ -56,6 +56,7 @@ app.post('/callback', async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 // Function to get access token
 async function getAccessToken() {
