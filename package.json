@@ -1,0 +1,17 @@
+{
+  "name": "seatalk-bot",
+  "version": "1.0.0",
+  "description": "Seatalk bot to auto-reply hello messages",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "body-parser": "^1.20.2",
+    "axios": "^1.5.1"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
