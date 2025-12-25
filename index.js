@@ -94,7 +94,7 @@ app.post('/callback', (req, res) => {
         const text = normalizeText(raw);
         console.log('Group raw:', raw, 'normalized:', text);
         if (text.includes('/hello') || text === 'hello') {
-          await sendGroupMessage(event.group_id, 'Hello group! 👋');
+          await sendGroupMessage(event.group_id, `@${event.employee_code} Hello! 👋`);
         }
       }
 
