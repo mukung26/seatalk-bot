@@ -69,3 +69,23 @@ async function getAccessToken() {
 // Function to send message to a group
 async function sendTextToGroup(groupId, text) {
   try {
+    const token = await getAccessToken();
+    const messageBody = {
+      group_code: groupId,
+      message: {
+        tag: 'text',
+        text: { content: text }
+      }
+    };
+    await axios.post('https://openapi.seatalk.io/messaging/v2/group_chat',
+      messageBody,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (err) {
+    console.error('Error sending message:', err);
+  }
+}
+
+// Listen on Render's PORT
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Seatalk bot running on port ${PORT}`));
