@@ -5,22 +5,28 @@ const crypto = require('crypto');
 const axios = require('axios');
 
 const app = express();
-app.use(bodyParser.json());
 
 // ---- CONFIG ----
 const APP_ID = process.env.SEATALK_APP_ID;
 const APP_SECRET = process.env.SEATALK_APP_SECRET;
 const SIGNING_SECRET = process.env.SEATALK_SIGNING_SECRET;
 
-// ---- HELPER: Verify SeaTalk signature ----
-function verifySignature(bodyStr, signature) {
+// ---- Capture raw body for signature verification ----
+app.use(bodyParser.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+
+// ---- Verify signature ----
+function verifySignature(rawBody, signature) {
   const hash = crypto.createHmac('sha256', SIGNING_SECRET)
-                     .update(bodyStr)
+                     .update(rawBody)
                      .digest('hex');
   return hash === signature;
 }
 
-// ---- Health check for Render ----
+// ---- Health check ----
 app.get('/healthz', (req, res) => res.send('OK'));
 
 // ---- Webhook endpoint ----
@@ -28,16 +34,17 @@ app.post('/callback', async (req, res) => {
   try {
     console.log('Received event:', JSON.stringify(req.body, null, 2));
 
-    // 1️⃣ Handle verification challenge
+    const rawBody = req.rawBody;
+    const signature = req.headers['signature'];
+
+    // 1️⃣ Verification event
     if (req.body.event_type === 'event_verification') {
       const challenge = req.body.event.seatalk_challenge;
-      console.log('Verification challenge received:', challenge);
+      console.log('Verification challenge:', challenge);
       return res.json({ seatalk_challenge: challenge });
     }
 
-    // 2️⃣ Verify signature for normal events
-    const rawBody = JSON.stringify(req.body);
-    const signature = req.headers['signature'];
+    // 2️⃣ Signature check for normal events
     if (!verifySignature(rawBody, signature)) {
       console.log('Invalid signature!');
       return res.status(401).send('Invalid signature');
@@ -55,7 +62,7 @@ app.post('/callback', async (req, res) => {
       await sendTextToGroup(groupId, `Hello everyone! 👋 I am TEST123, glad to join ${groupName}!`);
     }
 
-    // 4️⃣ Respond to /hello in group (no mention needed)
+    // 4️⃣ Respond to /hello command in group
     if (eventType === 'new_mentioned_message_received_from_group_chat' ||
         eventType === 'message_received_from_group') {
       const groupId = event.group.group_id;
@@ -67,16 +74,14 @@ app.post('/callback', async (req, res) => {
       }
     }
 
-    // 5️⃣ Respond 200 OK to SeaTalk
     res.sendStatus(200);
-
   } catch (err) {
     console.error('Error processing webhook:', err);
     res.sendStatus(500);
   }
 });
 
-// ---- Get App Access Token ----
+// ---- Get app access token ----
 async function getAccessToken() {
   try {
     const resp = await axios.post('https://openapi.seatalk.io/auth/app_access_token', {
