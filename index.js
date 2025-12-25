@@ -1,63 +1,66 @@
-// index.js
 const express = require('express');
-const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const axios = require('axios');
 
 const app = express();
-app.use(bodyParser.json());
 
-// Read credentials from environment variables
+// Middleware to capture raw body for verification
+app.use('/callback', express.raw({ type: '*/*' }));
+
+// Credentials
 const APP_ID = process.env.SEATALK_APP_ID;
 const APP_SECRET = process.env.SEATALK_APP_SECRET;
 const SIGNING_SECRET = process.env.SEATALK_SIGNING_SECRET;
 
-// Helper: verify SeaTalk signature
-function verifySignature(req) {
-  const timestamp = req.headers['x-seatalk-timestamp'];
-  const signature = req.headers['x-seatalk-signature'];
+// Verify signature
+function verifySignature(rawBody, headers) {
+  const timestamp = headers['x-seatalk-timestamp'];
+  const signature = headers['x-seatalk-signature'];
   if (!timestamp || !signature) return false;
-  const bodyStr = JSON.stringify(req.body);
   const hash = crypto.createHmac('sha256', SIGNING_SECRET)
-                     .update(timestamp + bodyStr)
+                     .update(timestamp + rawBody)
                      .digest('hex');
   return hash === signature;
 }
 
-// Health check for Render
+// Health check
 app.get('/healthz', (req, res) => res.send('OK'));
 
-// Webhook endpoint for Seatalk
+// Callback endpoint
 app.post('/callback', (req, res) => {
-  // SeaTalk verification challenge
-  if (req.body && req.body.seatalk_challenge) {
-    // Respond immediately with raw text
-    res.setHeader('Content-Type', 'text/plain');
-    return res.send(req.body.seatalk_challenge);
+  const rawBody = req.body.toString();
+
+  // Try parsing JSON
+  let parsed;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    parsed = {};
   }
 
-  // For normal events, you can process asynchronously
-  if (!verifySignature(req)) return res.status(401).send('Invalid signature');
+  // Verification challenge
+  if (parsed.seatalk_challenge) {
+    res.setHeader('Content-Type', 'text/plain');
+    return res.send(parsed.seatalk_challenge); // raw string
+  }
 
-  const payload = req.body;
+  // Verify signature for normal events
+  if (!verifySignature(rawBody, req.headers)) return res.status(401).send('Invalid signature');
 
-  // Process group messages asynchronously
-  if (payload.event_type === 'group_message') {
-    const event = payload.event;
+  // Handle group messages asynchronously
+  if (parsed.event_type === 'group_message') {
+    const event = parsed.event;
     const content = event.message.text?.content || '';
-
     if (content.toLowerCase().trim() === 'hello @auto bot!') {
-      // Fire and forget
       sendTextToGroup(event.group_code, 'Hello! I am Auto Bot. 👋');
     }
   }
 
-  // Respond 200 immediately
+  // Respond immediately
   res.sendStatus(200);
 });
 
-
-// Function to get access token
+// Functions to send messages
 async function getAccessToken() {
   const resp = await axios.post('https://openapi.seatalk.io/auth/app_access_token', {
     app_id: APP_ID,
@@ -66,26 +69,18 @@ async function getAccessToken() {
   return resp.data.app_access_token;
 }
 
-// Function to send message to a group
 async function sendTextToGroup(groupId, text) {
   try {
     const token = await getAccessToken();
-    const messageBody = {
+    await axios.post('https://openapi.seatalk.io/messaging/v2/group_chat', {
       group_code: groupId,
-      message: {
-        tag: 'text',
-        text: { content: text }
-      }
-    };
-    await axios.post('https://openapi.seatalk.io/messaging/v2/group_chat',
-      messageBody,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+      message: { tag: 'text', text: { content: text } }
+    }, { headers: { Authorization: `Bearer ${token}` } });
   } catch (err) {
     console.error('Error sending message:', err);
   }
 }
 
-// Listen on Render's PORT
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Seatalk bot running on port ${PORT}`));
