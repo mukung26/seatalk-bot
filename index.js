@@ -126,8 +126,8 @@ function startCountdown(seconds = 60) {
 function scheduleNextReminder() {
   const now = new Date();
   const nextReminder = new Date(now);
-  nextReminder.setUTCHours(21, 39, 0, 0); // 21:39 UTC = 5:39 AM GMT+8
-  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 39)) {
+  nextReminder.setUTCHours(21, 45, 0, 0); // 21:45 UTC = 5:45 AM GMT+8
+  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 45)) {
     nextReminder.setUTCDate(nextReminder.getUTCDate() + 1);
   }
   const delay = nextReminder - now;
