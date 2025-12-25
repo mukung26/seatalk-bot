@@ -1,81 +1,88 @@
-// index.js
 const express = require('express');
+const bodyParser = require('body-parser');
 const crypto = require('crypto');
 const axios = require('axios');
-const bodyParser = require('body-parser');
 
 const app = express();
+app.use(bodyParser.json());
 
-// Capture raw body for signature verification
-app.use(bodyParser.json({
-  verify: (req, res, buf) => { req.rawBody = buf; }
-}));
-
-// Load secrets from Render env
+// Environment variables
 const APP_ID = process.env.SEATALK_APP_ID;
 const APP_SECRET = process.env.SEATALK_APP_SECRET;
 const SIGNING_SECRET = process.env.SEATALK_SIGNING_SECRET;
 
-// Verify SeaTalk signature using raw body + signing secret
-function verifySignature(rawBody, signature) {
-  const hash = crypto.createHash('sha256')
-                     .update(Buffer.concat([rawBody, Buffer.from(SIGNING_SECRET)]))
+// --- Helper: verify SeaTalk signature ---
+function verifySignature(req) {
+  const timestamp = req.headers['x-seatalk-timestamp'];
+  const signature = req.headers['x-seatalk-signature'];
+  if (!timestamp || !signature) return false;
+  const bodyStr = JSON.stringify(req.body);
+  const hash = crypto.createHmac('sha256', SIGNING_SECRET)
+                     .update(timestamp + bodyStr)
                      .digest('hex');
   return hash === signature;
 }
 
-// Health check for Render
+// --- Health check ---
 app.get('/healthz', (req, res) => res.send('OK'));
 
-// Main callback endpoint
+// --- Webhook endpoint ---
 app.post('/callback', async (req, res) => {
   try {
-    const rawBody = req.rawBody;
-    const signature = req.headers['signature'];
+    const payload = req.body;
+    const event_type = payload.event_type;
 
-    console.log('Received event raw:', req.body);
-
-    // Handle verification handshake
-    if (req.body.event_type === 'event_verification') {
-      const challenge = req.body.event.seatalk_challenge;
-      console.log('Verification challenge:', challenge);
-      return res.json({ seatalk_challenge: challenge });
+    // --- SeaTalk verification ---
+    if (event_type === 'event_verification') {
+      console.log('Verification challenge:', payload.event.seatalk_challenge);
+      return res.json({ seatalk_challenge: payload.event.seatalk_challenge });
     }
 
-    if (!verifySignature(rawBody, signature)) {
-      console.log('Signature failed:', signature);
+    // --- Verify signature for normal events ---
+    if (!verifySignature(req)) {
+      console.log('Invalid signature!');
       return res.status(401).send('Invalid signature');
     }
 
-    const { event_type, event } = req.body;
-
-    // Bot added to group
+    // --- Bot added to group greeting ---
     if (event_type === 'bot_added_to_group_chat') {
-      const groupId = event.group.group_id;
-      const groupName = event.group.group_name;
-      console.log(`Bot added to group ${groupName}`);
-      await sendTextToGroup(groupId, `👋 Hello everyone! I am TEST123, happy to join ${groupName}!`);
+      const groupId = payload.event.group.group_id;
+      await sendTextToGroup(groupId, 'Hello everyone! 👋 I am your bot.');
+      return res.sendStatus(200);
     }
 
-    // Any text message in group
-    if (event_type === 'message_received_from_group') {
-      const text = event.message.text?.content?.trim().toLowerCase();
-      const groupId = event.group.group_id;
-      console.log(`Group message:`, text);
-
-      if (text === '/hello') {
-        await sendTextToGroup(groupId, `👋 Hi there! TEST123 is here!`);
+    // --- 1-on-1 chat ---
+    if (event_type === 'message_from_bot_subscriber') {
+      const message = payload.event.message;
+      const content = message.text?.content?.trim();
+      if (content === '/hello') {
+        const seatalkId = payload.event.seatalk_id;
+        await sendTextToBotUser(seatalkId, 'Hello! 👋');
       }
+      return res.sendStatus(200);
+    }
+
+    // --- Group chat ---
+    if (event_type === 'new_mentioned_message_received_from_group_chat' || event_type === 'group_message') {
+      const message = payload.event.message;
+      const content = message.text?.content?.trim();
+      const groupId = payload.event.group_code || payload.event.group?.group_id;
+
+      if (content === '/hello') {
+        await sendTextToGroup(groupId, 'Hello everyone! 👋');
+      }
+      return res.sendStatus(200);
     }
 
     res.sendStatus(200);
+
   } catch (err) {
-    console.error('Callback error:', err);
+    console.error('Error processing webhook:', err);
     res.sendStatus(500);
   }
 });
 
-// Get access token to call SeaTalk APIs
+// --- Function to get app access token ---
 async function getAccessToken() {
   const resp = await axios.post('https://openapi.seatalk.io/auth/app_access_token', {
     app_id: APP_ID,
@@ -84,26 +91,48 @@ async function getAccessToken() {
   return resp.data.app_access_token;
 }
 
-// Send text to a group
+// --- Function to send message to a group ---
 async function sendTextToGroup(groupId, text) {
   try {
     const token = await getAccessToken();
-    const body = {
+    const messageBody = {
       group_id: groupId,
       message: {
         tag: 'text',
-        text: { format: 1, content: text }
+        text: { content: text }
       }
     };
-    await axios.post('https://openapi.seatalk.io/messaging/v2/group_chat', body, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    console.log('Sent message to group:', groupId);
+    await axios.post(
+      'https://openapi.seatalk.io/messaging/v2/group_chat',
+      messageBody,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
   } catch (err) {
-    console.error('Send failed:', err.response?.data || err.message);
+    console.error('Error sending message to group:', err);
   }
 }
 
-// Start server
+// --- Function to send message to a bot user (1-on-1) ---
+async function sendTextToBotUser(seatalkId, text) {
+  try {
+    const token = await getAccessToken();
+    const messageBody = {
+      user_id: seatalkId,
+      message: {
+        tag: 'text',
+        text: { content: text }
+      }
+    };
+    await axios.post(
+      'https://openapi.seatalk.io/messaging/v2/bot_user_chat',
+      messageBody,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+  } catch (err) {
+    console.error('Error sending 1-on-1 message:', err);
+  }
+}
+
+// --- Start server ---
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Bot is running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Seatalk bot running on port ${PORT}`));
