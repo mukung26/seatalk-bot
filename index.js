@@ -36,23 +36,20 @@ async function sendGroupMessage(groupId, text) {
   }
 }
 
-async function sendUserMessage(employeeCode, text) {
+async function getJoinedGroups() {
   const token = await getAccessToken();
   try {
-    const res = await axios.post(
-      'https://openapi.seatalk.io/messaging/v2/single_chat',
-      {
-        employee_code: employeeCode,
-        message: {
-          tag: 'text',
-          text: { format: 2, content: text }
-        }
-      },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    console.log('sendUserMessage success:', res.data);
+    const res = await axios.get('https://openapi.seatalk.io/messaging/v2/group_chat/joined', {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (res.data.code === 0) {
+      groupIds = res.data.joined_group_chats.group_id || [];
+      console.log('Fetched joined groups:', groupIds);
+    } else {
+      console.error('Failed to fetch joined groups:', res.data);
+    }
   } catch (err) {
-    console.error('sendUserMessage error:', err?.response?.status, err?.response?.data || err.message);
+    console.error('Error fetching joined groups:', err?.response?.data || err.message);
   }
 }
 
@@ -126,8 +123,8 @@ function startCountdown(seconds = 60) {
 function scheduleNextReminder() {
   const now = new Date();
   const nextReminder = new Date(now);
-  nextReminder.setUTCHours(21, 45, 0, 0); // 21:45 UTC = 5:45 AM GMT+8
-  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 45)) {
+  nextReminder.setUTCHours(21, 50, 0, 0); // 21:50 UTC = 5:50 AM GMT+8
+  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 50)) {
     nextReminder.setUTCDate(nextReminder.getUTCDate() + 1);
   }
   const delay = nextReminder - now;
@@ -152,5 +149,8 @@ async function sendDailyReminder() {
   scheduleNextReminder();
 }
 
-// Initial schedule
-scheduleNextReminder();
+// Initial setup
+(async () => {
+  await getJoinedGroups();
+  scheduleNextReminder();
+})();
