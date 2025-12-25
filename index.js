@@ -7,6 +7,8 @@ app.use(express.json());
 const APP_ID = process.env.SEATALK_APP_ID;
 const APP_SECRET = process.env.SEATALK_APP_SECRET;
 
+let groupIds = []; // In-memory list of group IDs the bot is in
+
 app.get('/healthz', (req, res) => res.send('OK'));
 
 async function getAccessToken() {
@@ -99,7 +101,11 @@ app.post('/callback', (req, res) => {
       }
 
       if (eventType === 'bot_added_to_group_chat') {
-        await sendGroupMessage(event.group?.group_id, '👋 Hello everyone! Bot is online.');
+        const groupId = event.group?.group_id;
+        if (groupId && !groupIds.includes(groupId)) {
+          groupIds.push(groupId);
+        }
+        await sendGroupMessage(groupId, '👋 Hello everyone! Bot is online.');
       }
     } catch (err) {
       console.error('Processing error:', err?.response?.data || err.message || err);
@@ -109,3 +115,27 @@ app.post('/callback', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('SeaTalk bot running on port', PORT));
+
+// Schedule daily reminder at 5 AM GMT+8 (which is 21:00 UTC)
+function scheduleReminder() {
+  const now = new Date();
+  const nextReminder = new Date(now);
+  nextReminder.setUTCHours(21, 0, 0, 0); // 21:00 UTC = 5:00 GMT+8
+  if (now.getUTCHours() > 21 || (now.getUTCHours() === 21 && now.getUTCMinutes() >= 0)) {
+    nextReminder.setUTCDate(nextReminder.getUTCDate() + 1);
+  }
+  const delay = nextReminder - now;
+  setTimeout(() => {
+    sendDailyReminder();
+    setInterval(sendDailyReminder, 24 * 60 * 60 * 1000); // Every 24 hours
+  }, delay);
+}
+
+async function sendDailyReminder() {
+  const message = "Don't forget to fill up the IT Sheet form.";
+  for (const groupId of groupIds) {
+    await sendGroupMessage(groupId, message);
+  }
+}
+
+scheduleReminder();
