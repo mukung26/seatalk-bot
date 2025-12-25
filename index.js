@@ -28,33 +28,32 @@ function verifySignature(req) {
 app.get('/healthz', (req, res) => res.send('OK'));
 
 // Webhook endpoint for Seatalk
-app.post('/callback', async (req, res) => {
-  try {
-    // Respond to SeaTalk verification challenge first
-    if (req.body.seatalk_challenge) {
-      return res.send(req.body.seatalk_challenge);
-    }
-
-    // Verify signature for normal events
-    if (!verifySignature(req)) return res.status(401).send('Invalid signature');
-
-    const payload = req.body;
-
-    // Handle group messages
-    if (payload.event_type === 'group_message') {
-      const event = payload.event;
-      const content = event.message.text?.content || '';
-
-      if (content.toLowerCase().trim() === 'hello @auto bot!') {
-        await sendTextToGroup(event.group_code, 'Hello! I am Auto Bot. 👋');
-      }
-    }
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.error('Error processing webhook:', err);
-    res.sendStatus(500);
+app.post('/callback', (req, res) => {
+  // SeaTalk verification challenge
+  if (req.body && req.body.seatalk_challenge) {
+    // Respond immediately with raw text
+    res.setHeader('Content-Type', 'text/plain');
+    return res.send(req.body.seatalk_challenge);
   }
+
+  // For normal events, you can process asynchronously
+  if (!verifySignature(req)) return res.status(401).send('Invalid signature');
+
+  const payload = req.body;
+
+  // Process group messages asynchronously
+  if (payload.event_type === 'group_message') {
+    const event = payload.event;
+    const content = event.message.text?.content || '';
+
+    if (content.toLowerCase().trim() === 'hello @auto bot!') {
+      // Fire and forget
+      sendTextToGroup(event.group_code, 'Hello! I am Auto Bot. 👋');
+    }
+  }
+
+  // Respond 200 immediately
+  res.sendStatus(200);
 });
 
 
