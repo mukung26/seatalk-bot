@@ -2,35 +2,31 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>SeaAuto Cloud</title>
-    
-    <link rel="preconnect" href="https://cdn.tailwindcss.com">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SeaAuto Console</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
-    
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
     <style>
-        :root { --safe-bottom: env(safe-area-inset-bottom); }
-        body { font-family: 'Roboto', sans-serif; background: #f0f4f8; color: #1f1f1f; overflow: hidden; touch-action: manipulation; }
-        h1, h2, h3, .google-font { font-family: 'Google Sans', 'Roboto', sans-serif; }
-        .m3-card { background: white; border-radius: 16px; border: 1px solid #e0e2e7; }
-        .m3-card:active { transform: scale(0.995); transition: 0.1s; }
-        .modal-enter { animation: modalIn 0.2s cubic-bezier(0.2, 0, 0, 1); }
-        @keyframes modalIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-        .custom-scroll::-webkit-scrollbar { width: 4px; }
-        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-scroll::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+        body { font-family: 'Menlo', 'Monaco', 'Courier New', monospace; background: #0f172a; color: #e2e8f0; }
+        .coder-card { background: #1e293b; border: 1px solid #334155; border-radius: 4px; }
+        .coder-input { background: #0f172a; border: 1px solid #334155; color: #cbd5e1; font-family: inherit; }
+        .coder-input:focus { outline: none; border-color: #3b82f6; }
+        .coder-btn { background: #334155; border: 1px solid #475569; padding: 6px 12px; font-size: 12px; transition: 0.1s; }
+        .coder-btn:hover { background: #475569; border-color: #64748b; }
+        .coder-btn.primary { background: #2563eb; border-color: #1d4ed8; color: white; }
+        .coder-btn.primary:hover { background: #1d4ed8; }
+        .coder-btn.danger { background: #7f1d1d; border-color: #991b1b; color: #fecaca; }
         
-        /* Chat */
-        .chat-bubble { max-width: 85%; border-radius: 18px; padding: 10px 14px; position: relative; font-size: 0.95rem; line-height: 1.4; word-wrap: break-word; }
-        .chat-bubble.in { background-color: #ffffff; color: #1e293b; border-bottom-left-radius: 4px; border: 1px solid #e2e8f0; }
-        .chat-bubble.out { background-color: #2563eb; color: white; border-bottom-right-radius: 4px; }
+        /* Custom Scroll */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        .tab-active { background: #1e293b; color: #3b82f6; border-right: 2px solid #3b82f6; }
     </style>
 <script type="importmap">
 {
@@ -46,446 +42,368 @@
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
-        const BACKTICK = String.fromCharCode(96);
-        const NEWLINE = String.fromCharCode(10);
-        
-        // HARDCODED WORKER URL (You can change this)
         const DEFAULT_WORKER_URL = 'https://seatalk-be.jcruspero3263.workers.dev';
 
         function App() {
-            const [workerUrl, setWorkerUrl] = useState(localStorage.getItem('seaauto_worker_url') || DEFAULT_WORKER_URL);
-            const [isConnected, setIsConnected] = useState(false);
-            const [tab, setTab] = useState('status');
+            const [workerUrl] = useState(DEFAULT_WORKER_URL);
+            const [tab, setTab] = useState('console');
             
-            // UI State
-            const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth > 1024);
-            const [groups, setGroups] = useState([]);
-
-            // Data State
+            // Data
             const [config, setConfig] = useState({ tasks: [], isRunning: false });
-            const [status, setStatus] = useState({ lastHeartbeat: '...', kvStatus: '...' });
-            const [clock, setClock] = useState('--:--:--');
-            const [loading, setLoading] = useState(false);
-            
-            // Chat
+            const [status, setStatus] = useState({ lastHeartbeat: '-', kvStatus: '-' });
+            const [groups, setGroups] = useState([]);
             const [chatHistory, setChatHistory] = useState([]);
-            const [chatRecipient, setChatRecipient] = useState('');
+            const [logs, setLogs] = useState([]);
+            const [loading, setLoading] = useState(false);
+
+            // Inputs
+            const [manual, setManual] = useState({ id: '', msg: '', type: 'text' });
             const [chatMsg, setChatMsg] = useState('');
+            const [chatRecipient, setChatRecipient] = useState(''); // Email or Group ID
+            const [editing, setEditing] = useState(null);
+
             const chatEndRef = useRef(null);
-            const chatInputRef = useRef(null);
-            
-            // Manual Send
-            const [manual, setManual] = useState({ id: '', msg: '' });
-            
-            // Modals
-            const [editing, setEditing] = useState(null); 
-            const [modal, setModal] = useState(null); 
-            
-            // Refs
-            const manualTextareaRef = useRef(null);
-            const modalTextareaRef = useRef(null);
 
-            // API Helper
-            const apiCall = async (endpoint, options = {}) => {
-                const base = workerUrl.endsWith('/') ? workerUrl.slice(0, -1) : workerUrl;
-                const res = await fetch(`${base}${endpoint}`, options);
-                if (!res.ok) throw new Error(`API Error: ${res.statusText}`);
-                return res.json();
-            };
-
-            // Formatting
-            const insertFormat = (ref, setter, val, before, after='') => {
-                if (!ref.current) return;
-                const el = ref.current;
-                const start = el.selectionStart;
-                const end = el.selectionEnd;
-                const sel = val.substring(start, end);
-                const isWrapped = val.substring(start-before.length, start) === before && val.substring(end, end+after.length) === after;
-                let newVal = isWrapped ? val.substring(0, start-before.length) + sel + val.substring(end+after.length) 
-                                       : val.substring(0, start) + before + sel + after + val.substring(end);
-                setter(newVal);
-                setTimeout(() => {
-                    el.focus();
-                    const newCursor = isWrapped ? start - before.length : start + before.length;
-                    el.setSelectionRange(newCursor, newCursor + sel.length);
-                }, 0);
-            };
-            
-            const insertMention = (ref, setter, val, type) => {
-                let tag = '';
-                if(type === 'all') tag = '<mention-tag target="seatalk://user?id=0"/>';
-                else if(type === 'email') tag = '<mention-tag target="seatalk://user?email=test@example.com"/>';
-                insertFormat(ref, setter, val, tag);
+            // API Wrapper
+            const api = async (path, opts = {}) => {
+                try {
+                    const base = workerUrl.endsWith('/') ? workerUrl.slice(0, -1) : workerUrl;
+                    const res = await fetch(`${base}${path}`, opts);
+                    return await res.json();
+                } catch(e) { console.error(path, e); return null; }
             };
 
             const refresh = async (silent = false) => {
-                if (!silent) setLoading(true);
-                try {
-                    const [cfg, sts, chats] = await Promise.all([
-                        apiCall('/api/config'),
-                        apiCall('/api/status'),
-                        apiCall('/api/chat-history').catch(() => [])
-                    ]);
-                    setConfig(cfg || { tasks: [], isRunning: false });
-                    setStatus(prev => ({ ...prev, lastHeartbeat: sts.lastHeartbeat, kvStatus: sts.kvStatus }));
-                    if (Array.isArray(chats)) setChatHistory(chats);
-                    
-                    // Groups
-                    apiCall('/api/groups').then(g => {
-                        if(Array.isArray(g)) setGroups(g);
-                    }).catch(e=>console.log(e));
-
-                    setIsConnected(true);
-                } catch(e) { 
-                    if(!silent) console.error("Connection Error", e);
-                    setIsConnected(false);
-                }
+                if(!silent) setLoading(true);
+                const [cfg, sts, grp, ch, lg] = await Promise.all([
+                    api('/api/config'),
+                    api('/api/status'),
+                    api('/api/groups'),
+                    api('/api/chat-history'),
+                    api('/api/logs')
+                ]);
+                
+                if(cfg) setConfig(cfg);
+                if(sts) setStatus(sts);
+                if(grp && Array.isArray(grp)) setGroups(grp);
+                if(ch && Array.isArray(ch)) setChatHistory(ch);
+                if(lg && Array.isArray(lg)) setLogs(lg);
                 if(!silent) setLoading(false);
             };
 
-            useEffect(() => { refresh(); }, []);
-            useEffect(() => { const i = setInterval(() => refresh(true), 5000); return () => clearInterval(i); }, []);
-            
-            useEffect(() => {
-                const tick = setInterval(() => setClock(new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Singapore', hour12: false })), 1000);
-                return () => clearInterval(tick);
-            }, []);
-            
-            // Auto-scroll chat
-            useEffect(() => { if (tab === 'chat' && chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, tab, chatRecipient]);
+            useEffect(() => { refresh(); const i = setInterval(() => refresh(true), 5000); return () => clearInterval(i); }, []);
+            useEffect(() => { if(tab === 'chat' && chatEndRef.current) chatEndRef.current.scrollIntoView(); }, [chatHistory, tab]);
 
-            const saveConfig = async (newCfg) => {
+            // Actions
+            const toggleEngine = async () => {
+                const newCfg = { ...config, isRunning: !config.isRunning };
                 setConfig(newCfg);
-                await apiCall('/api/config', { method: 'POST', body: JSON.stringify(newCfg) });
-                refresh(true);
-            };
-
-            const sendChatReply = async () => {
-                if (!chatRecipient || !chatMsg.trim()) return;
-                try {
-                    const d = await apiCall('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: chatMsg }) });
-                    if (d.success) { setChatMsg(''); refresh(true); }
-                } catch(e) {}
+                await api('/api/config', { method: 'POST', body: JSON.stringify(newCfg) });
             };
 
             const sendManual = async () => {
-                if(!manual.id || !manual.msg) return setModal({title:"Error", content:"Select Group and enter message", type:'error'});
-                try {
-                    await apiCall('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: manual.msg }) });
-                    setModal({title:"Sent", content:"Message sent to group", type:'success'});
-                    setManual({...manual, msg:''});
-                } catch(e) { setModal({title:"Error", content:e.message, type:'error'}); }
-            };
-
-            const Toolbar = ({ setter, val, textRef }) => (
-                <div className="flex gap-1 mb-2 bg-slate-50 p-1 rounded-lg overflow-x-auto no-scrollbar">
-                    <button onClick={()=>insertFormat(textRef, (v)=>setter(v), val, '**','**')} className="p-2 hover:bg-white rounded min-w-[32px]" title="Bold"><span className="material-icons-outlined text-sm">format_bold</span></button>
-                    <button onClick={()=>insertFormat(textRef, (v)=>setter(v), val, '*','*')} className="p-2 hover:bg-white rounded min-w-[32px]" title="Italic"><span className="material-icons-outlined text-sm">format_italic</span></button>
-                    <button onClick={()=>insertFormat(textRef, (v)=>setter(v), val, '`','`')} className="p-2 hover:bg-white rounded min-w-[32px]" title="Code"><span className="material-icons-outlined text-sm">code</span></button>
-                    <div className="w-px h-4 bg-gray-300 mx-1 flex-shrink-0 self-center"></div>
-                    <button onClick={()=>insertMention(textRef, (v)=>setter(v), val, 'all')} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded font-bold whitespace-nowrap">@All</button>
-                    <button onClick={()=>insertMention(textRef, (v)=>setter(v), val, 'email')} className="px-2 py-1 bg-gray-200 text-gray-800 text-xs rounded font-bold whitespace-nowrap">@Email</button>
-                </div>
-            );
-
-            // AUTOMATION ACTIONS
-            const deleteTask = (id) => {
-                if(!confirm("Delete this automation?")) return;
-                const newTasks = config.tasks.filter(t => t.id !== id);
-                saveConfig({ ...config, tasks: newTasks });
-                setEditing(null);
-            };
-
-            const saveTask = () => {
-                if (!editing.name || !editing.groupId || !editing.time) return alert("Fill required fields");
+                if(!manual.id || !manual.msg) return alert("Missing ID or Message");
                 
-                let finalMsg = editing.message;
-                const grp = groups.find(g => g.id === editing.groupId);
-                const grpName = grp ? grp.name : 'Unknown';
-
-                if (editing.type === 'interactive') {
-                    finalMsg = JSON.stringify({
+                let payload = manual.msg;
+                
+                // Wrap content based on type if not raw text
+                if (manual.type === 'interactive') {
+                    payload = {
                         tag: "interactive_message",
                         interactive_message: {
                             elements: [
-                                { element_type: "title", title: { text: editing.interactiveTitle || "Notification" } },
-                                { element_type: "description", description: { format: 1, text: editing.message || "" } }
+                                { element_type: "title", title: { text: "Notice" } },
+                                { element_type: "description", description: { format: 1, text: manual.msg } }
                             ]
                         }
-                    });
-                } else if (editing.type === 'image') {
-                    finalMsg = JSON.stringify({ tag: "image", image: { file_id: editing.message.trim() } });
-                } else if (editing.type === 'file') {
-                    finalMsg = JSON.stringify({ tag: "file", file: { file_id: editing.message.trim() } });
+                    };
+                } else if (manual.type === 'image') {
+                    payload = { tag: "image", image: { file_id: manual.msg.trim() } };
+                } else if (manual.type === 'file') {
+                    payload = { tag: "file", file: { file_id: manual.msg.trim() } };
                 }
 
-                const newTask = { ...editing, message: finalMsg, groupName: grpName };
-                
-                let newTasks = [...(config.tasks || [])];
-                const idx = newTasks.findIndex(t => t.id === newTask.id);
-                if(idx > -1) newTasks[idx] = newTask; else newTasks.push(newTask);
-                
-                saveConfig({ ...config, tasks: newTasks });
-                setEditing(null);
+                await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: payload }) });
+                setManual({ ...manual, msg: '' });
+                refresh(true);
             };
 
-            const openEditModal = (task) => {
-                let type = 'text';
-                let content = task.message;
-                let title = '';
+            const sendChat = async () => {
+                if(!chatRecipient || !chatMsg) return;
+                await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: chatMsg }) });
+                setChatMsg('');
+                refresh(true);
+            };
 
+            const saveTask = async () => {
+                const now = new Date();
+                // Ensure time is set
+                const t = editing.time || `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+                
+                const task = { 
+                    ...editing, 
+                    time: t,
+                    groupName: groups.find(g=>g.id === editing.groupId)?.name || editing.groupId
+                };
+                
+                // Logic to fix msg payload like in manual send
+                let finalMsg = task.message;
                 try {
-                    const obj = JSON.parse(task.message);
-                    if (obj.tag === 'interactive_message') {
-                        type = 'interactive';
-                        const els = obj.interactive_message?.elements || [];
-                        const tEl = els.find(e => e.element_type === 'title');
-                        const dEl = els.find(e => e.element_type === 'description');
-                        if (tEl) title = tEl.title.text;
-                        if (dEl) content = dEl.description.text;
-                    } else if (obj.tag === 'image') {
-                        type = 'image';
-                        content = obj.image.file_id;
-                    } else if (obj.tag === 'file') {
-                        type = 'file';
-                        content = obj.file.file_id;
-                    }
-                } catch(e) {}
+                     // Check if user already provided valid JSON
+                     JSON.parse(task.message);
+                } catch(e) {
+                     // If not JSON, auto-wrap based on type
+                     if (task.type === 'image') finalMsg = JSON.stringify({ tag: "image", image: { file_id: task.message } });
+                     else if (task.type === 'file') finalMsg = JSON.stringify({ tag: "file", file: { file_id: task.message } });
+                     // Text/Interactive usually handled via raw JSON input in editor, or simple string
+                }
 
-                setEditing({ ...task, type, message: content, interactiveTitle: title });
+                const newTasks = [...(config.tasks||[])];
+                const idx = newTasks.findIndex(x=>x.id === task.id);
+                if(idx > -1) newTasks[idx] = {...task, message: finalMsg}; else newTasks.push({...task, message: finalMsg});
+                
+                await api('/api/config', { method: 'POST', body: JSON.stringify({ ...config, tasks: newTasks }) });
+                setEditing(null);
+                refresh(true);
             };
 
-            if (!isConnected && loading) return <div className="h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div></div>;
+            const deleteTask = async (id) => {
+                if(!confirm("Kill process?")) return;
+                const newTasks = config.tasks.filter(t => t.id !== id);
+                await api('/api/config', { method: 'POST', body: JSON.stringify({ ...config, tasks: newTasks }) });
+                refresh(true);
+            };
+
+            const createNewTask = () => {
+                const now = new Date();
+                const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+                setEditing({ id: Date.now(), name: 'New_Task', time: currentTime, groupId: '', message: '', type: 'text', enabled: true });
+            };
+
+            // Components
+            const SidebarItem = ({ id, icon, label }) => (
+                <button onClick={() => setTab(id)} className={`w-full text-left p-3 flex items-center gap-3 text-sm font-bold hover:bg-slate-800 ${tab === id ? 'tab-active' : 'text-slate-400'}`}>
+                    <span className="material-icons-outlined text-lg">{icon}</span> {label}
+                </button>
+            );
 
             return (
-                <div className="flex h-[100dvh] bg-[#f0f4f8] overflow-hidden flex-col md:flex-row relative">
-                    
-                    {/* Toggle Button (Always visible) */}
-                    <button onClick={() => setSidebarOpen(!sidebarOpen)} className="fixed top-4 left-4 z-50 p-2 bg-white rounded-lg shadow-md text-gray-700 hover:bg-gray-50 transition-colors">
-                        <span className="material-icons-outlined">{sidebarOpen ? 'menu_open' : 'menu'}</span>
-                    </button>
-
-                    {/* SIDEBAR */}
-                    <aside className={`fixed top-0 bottom-0 left-0 w-64 bg-white border-r border-gray-200 z-40 transition-transform duration-300 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-                        <div className="h-16 flex items-center px-6 justify-end">
-                             <div className="flex items-center mr-auto pl-8">
-                                <span className="material-icons-outlined text-blue-600 text-3xl mr-2">cloud_circle</span>
-                                <span className="text-xl font-bold text-gray-800 tracking-tight">SeaAuto</span>
-                             </div>
+                <div className="flex h-screen w-full">
+                    {/* Sidebar */}
+                    <div className="w-16 md:w-56 flex-shrink-0 border-r border-slate-700 bg-slate-900 flex flex-col">
+                        <div className="p-4 border-b border-slate-700 font-bold text-blue-500 flex items-center gap-2">
+                            <span className="material-icons-outlined">terminal</span> <span className="hidden md:inline">SEAAUTO</span>
                         </div>
-                        <div className="p-4 space-y-1 flex-1 overflow-y-auto">
-                            {[
-                                { id: 'status', icon: 'dashboard', label: 'Dashboard' },
-                                { id: 'tasks', icon: 'schedule', label: 'Automations' },
-                                { id: 'chat', icon: 'forum', label: 'Live Chat' },
-                                { id: 'manual', icon: 'send', label: 'Quick Send' }
-                            ].map(item => (
-                                <button key={item.id} onClick={() => { setTab(item.id); if(window.innerWidth<=768) setSidebarOpen(false); }} className={`w-full flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-colors ${tab === item.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}>
-                                    <span className="material-icons-outlined mr-3">{item.icon}</span>{item.label}
-                                </button>
-                            ))}
+                        <div className="flex-1 overflow-y-auto">
+                            <SidebarItem id="console" icon="dvr" label="Console" />
+                            <SidebarItem id="chat" icon="chat" label="Live Chat" />
+                            <SidebarItem id="cron" icon="schedule" label="Cron Jobs" />
                         </div>
-                        <div className="p-4 bg-gray-50 border-t border-gray-100">
-                            <div className="text-xs text-gray-500 uppercase font-bold">Server Time</div>
-                            <div className="font-mono text-xl font-bold text-gray-800">{clock}</div>
+                        <div className="p-4 border-t border-slate-700 text-xs text-slate-500 hidden md:block">
+                            <div>HB: {status.lastHeartbeat.split(' ')[1]}</div>
+                            <div className={config.isRunning ? "text-green-500" : "text-red-500"}>{config.isRunning ? "● SYSTEM UP" : "○ SYSTEM DOWN"}</div>
                         </div>
-                    </aside>
+                    </div>
 
-                    {/* OVERLAY (Mobile only) */}
-                    {sidebarOpen && <div className="fixed inset-0 bg-black/30 z-30 md:hidden" onClick={() => setSidebarOpen(false)}></div>}
-
-                    {/* MAIN CONTENT */}
-                    <main className={`flex-1 h-full overflow-y-auto custom-scroll pb-20 md:pb-0 bg-[#f0f4f8] transition-all duration-300 ${sidebarOpen ? 'md:ml-64' : 'md:ml-0'}`}>
-                        <div className="max-w-4xl mx-auto p-4 md:p-8 pt-16 md:pt-8">
-                            
-                            {/* DASHBOARD */}
-                            {tab === 'status' && (
-                                <div className="space-y-4 animate-fade-in">
-                                    <div className="m3-card p-6 bg-white flex flex-col items-center text-center">
-                                        <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${config.isRunning ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                                            <span className="material-icons-outlined text-3xl">power_settings_new</span>
+                    {/* Main */}
+                    <div className="flex-1 flex flex-col min-w-0 bg-[#0f172a]">
+                        
+                        {/* CONSOLE (Dashboard + Manual) */}
+                        {tab === 'console' && (
+                            <div className="p-4 md:p-8 space-y-6 overflow-y-auto">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="coder-card p-4">
+                                        <div className="text-xs text-slate-400 uppercase font-bold mb-1">Engine Status</div>
+                                        <div className="flex justify-between items-center">
+                                            <span className={`text-xl font-bold ${config.isRunning ? 'text-green-400' : 'text-red-400'}`}>{config.isRunning ? 'RUNNING' : 'STOPPED'}</span>
+                                            <button onClick={toggleEngine} className="coder-btn">{config.isRunning ? 'STOP' : 'START'}</button>
                                         </div>
-                                        <h2 className="text-xl font-bold text-gray-900">{config.isRunning ? 'System Active' : 'System Paused'}</h2>
-                                        <p className="text-gray-500 text-sm mb-6 max-w-xs">Automated tasks are {config.isRunning ? 'running on schedule' : 'currently disabled'}.</p>
-                                        <button onClick={()=>saveConfig({...config, isRunning: !config.isRunning})} className={`px-8 py-3 rounded-full font-bold shadow-md transition-all ${config.isRunning ? 'bg-white border border-red-200 text-red-600 hover:bg-red-50' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-                                            {config.isRunning ? 'Stop Engine' : 'Start Engine'}
-                                        </button>
+                                    </div>
+                                    <div className="coder-card p-4">
+                                        <div className="text-xs text-slate-400 uppercase font-bold mb-1">Active Tasks</div>
+                                        <div className="text-xl font-bold text-blue-400">{config.tasks?.filter(t=>t.enabled).length || 0} / {config.tasks?.length || 0}</div>
+                                    </div>
+                                    <div className="coder-card p-4">
+                                        <div className="text-xs text-slate-400 uppercase font-bold mb-1">Uptime</div>
+                                        <div className="text-xl font-bold text-slate-200">{status.lastHeartbeat}</div>
                                     </div>
                                 </div>
-                            )}
 
-                            {/* TASKS */}
-                            {tab === 'tasks' && (
-                                <div className="space-y-4 animate-fade-in">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <h2 className="text-xl font-bold text-gray-800">Automations</h2>
-                                        <button onClick={()=>setEditing({id: Date.now(), name:'New Task', time:'09:00', groupId:'', message:'', type:'text', enabled:true})} className="bg-blue-600 text-white w-10 h-10 rounded-full shadow flex items-center justify-center"><span className="material-icons-outlined">add</span></button>
+                                <div className="coder-card p-6">
+                                    <div className="text-sm font-bold text-blue-400 mb-4 border-b border-slate-700 pb-2 flex justify-between">
+                                        <span>QUICK_SEND_PROTOCOL</span>
+                                        <span className="text-xs text-slate-500 font-normal">Direct API Injection</span>
                                     </div>
-                                    {config.tasks?.map(t => (
-                                        <div key={t.id} onClick={()=>openEditModal(t)} className="m3-card p-4 flex items-center gap-3 cursor-pointer hover:border-blue-300 transition">
-                                            <div className="w-12 h-12 bg-blue-50 rounded-xl flex flex-col items-center justify-center text-blue-700 font-bold leading-none">
-                                                <span>{t.time.split(':')[0]}</span><span className="text-xs">{t.time.split(':')[1]}</span>
+                                    <div className="space-y-4">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">TARGET_GROUP</label>
+                                                <select className="coder-input w-full p-2 text-sm rounded" value={manual.id} onChange={e=>setManual({...manual, id:e.target.value})}>
+                                                    <option value="">-- Select Target --</option>
+                                                    {groups.map(g => <option key={g.id} value={g.id}>{g.name} [{g.id}]</option>)}
+                                                </select>
                                             </div>
-                                            <div className="flex-1 min-w-0">
-                                                <h3 className="font-bold text-gray-900 truncate">{t.name}</h3>
-                                                <p className="text-xs text-gray-500 truncate">{t.groupName || t.groupId}</p>
+                                            <div>
+                                                <label className="block text-xs text-slate-500 mb-1">PAYLOAD_TYPE</label>
+                                                <select className="coder-input w-full p-2 text-sm rounded" value={manual.type} onChange={e=>setManual({...manual, type:e.target.value})}>
+                                                    <option value="text">Text (Markdown)</option>
+                                                    <option value="interactive">Interactive (Card)</option>
+                                                    <option value="image">Image (File ID)</option>
+                                                    <option value="file">File (File ID)</option>
+                                                </select>
                                             </div>
-                                            <div className={`w-3 h-3 rounded-full ${t.enabled ? 'bg-green-500' : 'bg-gray-300'}`}></div>
                                         </div>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* CHAT */}
-                            {tab === 'chat' && (
-                                <div className="flex flex-col h-[calc(100vh-80px)] md:h-[calc(100vh-60px)] -m-4 md:m-0 bg-white md:rounded-2xl md:shadow-sm border border-gray-200">
-                                    <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-                                        <h3 className="font-bold text-gray-700 flex items-center gap-2"><span className="material-icons-outlined">forum</span> Live Chat</h3>
-                                        <button onClick={()=>{
-                                            const email = prompt("Enter Employee Email:");
-                                            if(email && email.includes('@')) setChatRecipient(email);
-                                        }} className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-full font-bold hover:bg-blue-200 transition">
-                                            + New Chat
-                                        </button>
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">DATA_CONTENT</label>
+                                            <textarea className="coder-input w-full p-3 text-sm font-mono h-24 rounded" 
+                                                value={manual.msg} 
+                                                onChange={e=>setManual({...manual, msg:e.target.value})}
+                                                placeholder={manual.type === 'text' ? "Enter text message..." : "Enter File ID..."}
+                                            ></textarea>
+                                        </div>
+                                        <div className="flex justify-end">
+                                            <button onClick={sendManual} className="coder-btn primary flex items-center gap-2">
+                                                <span className="material-icons-outlined text-sm">send</span> EXECUTE
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scroll bg-slate-50">
-                                        {chatHistory.length === 0 && <div className="text-center text-gray-400 mt-20">No messages</div>}
-                                        {chatHistory.sort((a,b)=>a.time-b.time).map((msg, i) => (
-                                            <div key={i} className={`flex flex-col w-full ${msg.direction === 'out' ? 'items-end' : 'items-start'}`}>
-                                                <div className="text-[10px] text-gray-400 mb-1 px-2 flex gap-2">
-                                                    <span className="font-bold">{msg.senderName}</span>
-                                                    <span>{msg.senderEmail ? `(${msg.senderEmail})` : ''}</span>
-                                                </div>
-                                                <div onClick={() => {
-                                                    let target = msg.sender;
-                                                    if(msg.senderEmail) target = msg.senderEmail; 
-                                                    setChatRecipient(target);
-                                                }} className={`chat-bubble cursor-pointer ${msg.direction === 'out' ? 'out' : 'in'} shadow-sm`}>
-                                                    {msg.text}
-                                                </div>
-                                                <div className="text-[9px] text-gray-300 mt-1 px-1">{new Date(msg.time).toLocaleTimeString()}</div>
+                                </div>
+
+                                <div className="coder-card p-4">
+                                    <div className="text-xs font-bold text-slate-500 mb-2">SYSTEM_LOGS</div>
+                                    <div className="h-48 overflow-y-auto font-mono text-xs space-y-1 p-2 bg-black rounded border border-slate-800">
+                                        {logs.map((l, i) => (
+                                            <div key={i} className="flex gap-2">
+                                                <span className="text-slate-500">[{new Date(l.time).toLocaleTimeString()}]</span>
+                                                <span className={l.level === 'ERROR' ? 'text-red-500' : 'text-green-500'}>{l.level}</span>
+                                                <span className="text-slate-300">{l.message}</span>
                                             </div>
                                         ))}
-                                        <div ref={chatEndRef}></div>
-                                    </div>
-                                    
-                                    {/* Chat Input Area */}
-                                    <div className="p-3 bg-white border-t border-gray-200">
-                                        {chatRecipient && (
-                                            <div className="flex justify-between bg-blue-50 px-3 py-1.5 rounded text-xs text-blue-800 mb-2">
-                                                <span>Replying to: <b>{chatRecipient}</b></span>
-                                                <button onClick={()=>setChatRecipient('')}><span className="material-icons-outlined text-sm">close</span></button>
-                                            </div>
-                                        )}
-                                        <div className="border border-gray-200 rounded-xl p-2 bg-gray-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-blue-500 transition-colors">
-                                            <Toolbar setter={setChatMsg} val={chatMsg} textRef={chatInputRef} />
-                                            <div className="flex gap-2 items-end">
-                                                <textarea ref={chatInputRef} className="flex-1 bg-transparent text-sm outline-none resize-none max-h-24 py-2" rows="1" placeholder={chatRecipient ? "Type reply..." : "Select a user to reply..."} value={chatMsg} onChange={e=>setChatMsg(e.target.value)} onKeyDown={e=> { if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChatReply(); } }} disabled={!chatRecipient}></textarea>
-                                                <button onClick={sendChatReply} disabled={!chatRecipient || !chatMsg.trim()} className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center mb-1 disabled:opacity-50 hover:bg-blue-700 transition"><span className="material-icons-outlined text-sm">send</span></button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* MANUAL - GROUP SELECTION */}
-                            {tab === 'manual' && (
-                                <div className="m3-card p-6 space-y-4 animate-fade-in">
-                                    <h2 className="text-xl font-bold">Quick Send</h2>
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500 uppercase">Target Group</label>
-                                        <select className="w-full mt-1 bg-gray-50 border rounded-lg p-3 outline-none focus:ring-1 focus:ring-blue-500" value={manual.id} onChange={e=>setManual({...manual, id:e.target.value})}>
-                                            <option value="">Select Group...</option>
-                                            {groups.map(g => (
-                                                <option key={g.id} value={g.id}>{g.name} ({g.id})</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500 uppercase">Message</label>
-                                        <div className="mt-1 border border-gray-200 rounded-xl p-2 bg-gray-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-blue-500 transition-colors">
-                                            <Toolbar setter={(v)=>setManual({...manual, msg:v})} val={manual.msg} textRef={manualTextareaRef} />
-                                            <textarea ref={manualTextareaRef} className="w-full bg-transparent p-2 h-32 text-sm outline-none resize-none" placeholder="Type message..." value={manual.msg} onChange={e=>setManual({...manual, msg:e.target.value})}></textarea>
-                                        </div>
-                                    </div>
-                                    <button onClick={sendManual} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow hover:bg-blue-700 transition">Send to Group</button>
-                                </div>
-                            )}
-                        </div>
-                    </main>
-
-                    {/* EDIT MODAL */}
-                    {editing && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-                            <div className="bg-white w-full max-w-md rounded-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
-                                <h3 className="font-bold text-lg mb-4">Edit Automation</h3>
-                                <div className="space-y-4 overflow-y-auto custom-scroll flex-1">
-                                    <div className="flex gap-2">
-                                        <div className="flex-1">
-                                            <label className="text-xs font-bold text-gray-500">Time</label>
-                                            <input type="time" className="w-full border rounded-lg p-2" value={editing.time} onChange={e=>setEditing({...editing, time:e.target.value})} />
-                                        </div>
-                                        <div className="flex-1">
-                                            <label className="text-xs font-bold text-gray-500">Name</label>
-                                            <input className="w-full border rounded-lg p-2" value={editing.name} onChange={e=>setEditing({...editing, name:e.target.value})} />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500">Group Selection</label>
-                                        <select className="w-full border rounded-lg p-2 mt-1" value={editing.groupId} onChange={e=>setEditing({...editing, groupId:e.target.value})}>
-                                            <option value="">Select Group...</option>
-                                            {groups.map(g => (
-                                                <option key={g.id} value={g.id}>{g.name} ({g.id})</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    
-                                    <div>
-                                        <label className="text-xs font-bold text-gray-500">Message Type</label>
-                                        <select className="w-full border rounded-lg p-2 mt-1" value={editing.type} onChange={e=>setEditing({...editing, type:e.target.value})}>
-                                            <option value="text">Text Message</option>
-                                            <option value="interactive">Interactive (Title + Desc)</option>
-                                            <option value="image">Image (File ID)</option>
-                                            <option value="file">File (File ID)</option>
-                                        </select>
-                                    </div>
-
-                                    {editing.type === 'interactive' && (
-                                        <div>
-                                            <label className="text-xs font-bold text-gray-500">Title</label>
-                                            <input className="w-full border rounded-lg p-2 mb-2 font-bold" value={editing.interactiveTitle || ''} onChange={e=>setEditing({...editing, interactiveTitle:e.target.value})} placeholder="Message Title" />
-                                        </div>
-                                    )}
-
-                                    {/* Description / Content Area */}
-                                    <div>
-                                        <div className="flex justify-between mb-1"><label className="text-xs font-bold text-gray-500">{editing.type === 'interactive' ? 'Description' : (editing.type === 'text' ? 'Content' : 'File ID')}</label></div>
-                                        
-                                        {(editing.type === 'text' || editing.type === 'interactive') && (
-                                            <Toolbar setter={(v)=>setEditing({...editing, message:v})} val={editing.message} textRef={modalTextareaRef} />
-                                        )}
-                                        
-                                        <textarea ref={modalTextareaRef} className={`w-full border rounded-lg p-2 text-sm ${editing.type==='text'||editing.type==='interactive' ? 'h-32' : 'h-16 font-mono'}`} value={editing.message} onChange={e=>setEditing({...editing, message:e.target.value})} placeholder={editing.type === 'image' || editing.type === 'file' ? "Paste File ID here..." : "Type message content..."}></textarea>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between pt-4 mt-4 border-t border-gray-100">
-                                    <button onClick={()=>deleteTask(editing.id)} className="text-red-500 font-bold text-sm">Delete</button>
-                                    <div className="flex gap-2">
-                                        <button onClick={()=>setEditing(null)} className="px-4 py-2 text-gray-600 font-bold text-sm">Cancel</button>
-                                        <button onClick={saveTask} className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold text-sm">Save</button>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {/* ALERT MODAL */}
-                    {modal && (
-                        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={()=>setModal(null)}>
-                            <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm w-full" onClick={e=>e.stopPropagation()}>
-                                <h3 className={`font-bold mb-2 ${modal.type==='error'?'text-red-600':''}`}>{modal.title}</h3>
-                                <p className="text-sm text-gray-600 mb-4">{modal.content}</p>
-                                <button onClick={()=>setModal(null)} className="w-full py-2 bg-gray-100 rounded-lg font-bold text-sm">Close</button>
+                        {/* LIVE CHAT */}
+                        {tab === 'chat' && (
+                            <div className="flex flex-col h-full">
+                                <div className="p-3 border-b border-slate-700 bg-slate-800 flex justify-between items-center">
+                                    <div className="font-bold text-sm">LIVE_STREAM</div>
+                                    <div className="flex gap-2">
+                                        <button onClick={()=>{
+                                            const email = prompt("Direct Email Target:");
+                                            if(email) setChatRecipient(email);
+                                        }} className="coder-btn">+ DIRECT</button>
+                                    </div>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                    {chatHistory.sort((a,b)=>a.time-b.time).map((msg, i) => (
+                                        <div key={i} className={`flex flex-col ${msg.direction==='out' ? 'items-end' : 'items-start'}`}>
+                                            <div className="text-[10px] text-slate-500 mb-1 flex gap-2 font-mono">
+                                                <span className="text-blue-400 font-bold">{msg.senderName}</span>
+                                                <span>&lt;{msg.senderEmail || 'NO_EMAIL'}&gt;</span>
+                                                <span>{new Date(msg.time).toLocaleTimeString()}</span>
+                                            </div>
+                                            <div 
+                                                onClick={() => {
+                                                    // Auto-set recipient to Email if available, else ID
+                                                    const target = msg.senderEmail || msg.sender;
+                                                    setChatRecipient(target);
+                                                }}
+                                                className={`max-w-[80%] p-3 text-sm rounded cursor-pointer border ${msg.direction==='out' ? 'bg-blue-900/30 border-blue-800 text-blue-100' : 'bg-slate-800 border-slate-700 text-slate-200'}`}
+                                            >
+                                                {msg.text}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <div ref={chatEndRef}></div>
+                                </div>
+                                <div className="p-4 bg-slate-800 border-t border-slate-700">
+                                    {chatRecipient && <div className="text-xs text-blue-400 mb-1 font-mono">TARGET: {chatRecipient} <button onClick={()=>setChatRecipient('')} className="text-red-400 ml-2 hover:underline">CLEAR</button></div>}
+                                    <div className="flex gap-2">
+                                        <input className="coder-input flex-1 p-2 text-sm rounded" 
+                                            value={chatMsg} onChange={e=>setChatMsg(e.target.value)} 
+                                            onKeyDown={e=>e.key==='Enter' && sendChat()}
+                                            placeholder={chatRecipient ? "Type reply..." : "Select user message to reply..."}
+                                            disabled={!chatRecipient}
+                                        />
+                                        <button onClick={sendChat} disabled={!chatRecipient} className="coder-btn primary">SEND</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* CRON JOBS (Automations) */}
+                        {tab === 'cron' && (
+                            <div className="p-4 md:p-8 space-y-4">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-lg font-bold text-slate-200">CRONTAB</h2>
+                                    <button onClick={createNewTask} className="coder-btn primary">NEW JOB</button>
+                                </div>
+                                <div className="coder-card overflow-hidden">
+                                    <table className="w-full text-left text-sm font-mono">
+                                        <thead className="bg-slate-800 text-slate-400 border-b border-slate-700">
+                                            <tr>
+                                                <th className="p-3">TIME</th>
+                                                <th className="p-3">NAME</th>
+                                                <th className="p-3">GROUP</th>
+                                                <th className="p-3">STATUS</th>
+                                                <th className="p-3 text-right">ACTION</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-700">
+                                            {config.tasks?.map(t => (
+                                                <tr key={t.id} className="hover:bg-slate-800/50">
+                                                    <td className="p-3 font-bold text-yellow-400">{t.time}</td>
+                                                    <td className="p-3">{t.name}</td>
+                                                    <td className="p-3 text-xs text-slate-500">{t.groupName}</td>
+                                                    <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded ${t.enabled ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>{t.enabled ? 'ACTIVE' : 'DISABLED'}</span></td>
+                                                    <td className="p-3 text-right space-x-2">
+                                                        <button onClick={()=>setEditing(t)} className="text-blue-400 hover:text-blue-300">EDIT</button>
+                                                        <button onClick={()=>deleteTask(t.id)} className="text-red-400 hover:text-red-300">KILL</button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Editor Modal */}
+                    {editing && (
+                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+                            <div className="coder-card w-full max-w-lg p-6 space-y-4 bg-[#0f172a]">
+                                <div className="text-lg font-bold border-b border-slate-700 pb-2">JOB CONFIGURATION</div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><label className="block text-xs text-slate-500 mb-1">TRIGGER_TIME</label><input type="time" className="coder-input w-full p-2 rounded" value={editing.time} onChange={e=>setEditing({...editing, time:e.target.value})} /></div>
+                                    <div><label className="block text-xs text-slate-500 mb-1">JOB_ID</label><input className="coder-input w-full p-2 rounded" value={editing.name} onChange={e=>setEditing({...editing, name:e.target.value})} /></div>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">TARGET</label>
+                                    <select className="coder-input w-full p-2 rounded" value={editing.groupId} onChange={e=>setEditing({...editing, groupId:e.target.value})}>
+                                        <option value="">-- Select Group --</option>
+                                        {groups.map(g => <option key={g.id} value={g.id}>{g.name} [{g.id}]</option>)}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">TYPE</label>
+                                    <select className="coder-input w-full p-2 rounded" value={editing.type || 'text'} onChange={e=>setEditing({...editing, type:e.target.value})}>
+                                        <option value="text">Text Message</option>
+                                        <option value="interactive">Interactive</option>
+                                        <option value="image">Image (File ID)</option>
+                                        <option value="file">File (File ID)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-500 mb-1">PAYLOAD</label>
+                                    <textarea className="coder-input w-full p-3 h-32 rounded font-mono text-xs" value={editing.message} onChange={e=>setEditing({...editing, message:e.target.value})} placeholder={editing.type === 'image' ? "FILE_ID_HERE" : "Message content or JSON..."}></textarea>
+                                </div>
+                                <div className="flex justify-end gap-3 pt-2">
+                                    <button onClick={()=>setEditing(null)} className="coder-btn">CANCEL</button>
+                                    <button onClick={saveTask} className="coder-btn primary">COMMIT</button>
+                                </div>
                             </div>
                         </div>
                     )}
