@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SeaAuto</title>
-    <link rel="icon" type="image/png" href="https://cdn-app.seatalk.io/public/seatalk-favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -32,6 +31,8 @@
         .tab-active { background: #1e293b; color: #3b82f6; border-right: 2px solid #3b82f6; }
         .toolbar-btn { padding: 4px 8px; border-radius: 3px; font-size: 10px; background: #334155; color: #94a3b8; }
         .toolbar-btn:hover { background: #475569; color: white; }
+
+        .img-preview { max-height: 100px; border-radius: 4px; border: 1px solid #334155; margin-bottom: 8px; display: block; }
     </style>
 <script type="importmap">
 {
@@ -48,21 +49,6 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         const DEFAULT_WORKER_URL = 'https://seatalk-be.jcruspero3263.workers.dev';
-
-        // --- TOOL DEFINITIONS ---
-        const MCP_TOOLS = [
-            { name: "get_employee_profile", params: '{"employee_code": "EMP123"}' },
-            { name: "get_employee_code_with_email", params: '{"emails": ["user@example.com"]}' },
-            { name: "check_employee_existence", params: '{"id": "ST123"}' },
-            { name: "get_user_language_preference", params: '{"employee_code": "EMP123"}' },
-            { name: "get_joined_group_chat_list", params: '{"page_size": 10}' },
-            { name: "get_thread_by_thread_id", params: '{"group_id": "", "thread_id": ""}' },
-            { name: "get_message_by_message_id", params: '{"message_id": ""}' },
-            { name: "get_chat_history", params: '{"group_id": "", "page_size": 20}' },
-            { name: "get_group_info", params: '{"group_id": ""}' },
-            { name: "send_message_to_group_chat", params: '{"group_id": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' },
-            { name: "send_message_to_bot_user", params: '{"employee_code": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' }
-        ];
 
         // --- TOOLBAR COMPONENT ---
         const Toolbar = ({ insert }) => (
@@ -81,7 +67,63 @@
             </div>
         );
 
+        function Login({ onLogin }) {
+            const [user, setUser] = useState('');
+            const [pass, setPass] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                setError('');
+                try {
+                    const base = DEFAULT_WORKER_URL.endsWith('/') ? DEFAULT_WORKER_URL.slice(0, -1) : DEFAULT_WORKER_URL;
+                    const res = await fetch(`${base}/api/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: user, password: pass })
+                    });
+                    const data = await res.json();
+                    if(data.success && data.token) {
+                        onLogin(data.token);
+                    } else {
+                        setError(data.error || "Login Failed");
+                    }
+                } catch(err) {
+                    setError("Network Error");
+                }
+                setLoading(false);
+            };
+
+            return (
+                <div className="flex h-screen items-center justify-center bg-[#0f172a]">
+                    <div className="coder-card p-8 w-full max-w-sm">
+                        <div className="text-center mb-6">
+                            <span className="material-icons-outlined text-4xl text-blue-500">lock</span>
+                            <h1 className="text-xl font-bold mt-2">SeaAuto Login</h1>
+                        </div>
+                        <form onSubmit={handleLogin} className="space-y-4">
+                            <div>
+                                <label className="block text-xs text-slate-500 mb-1">USERNAME</label>
+                                <input className="coder-input w-full p-2 rounded" value={user} onChange={e=>setUser(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="block text-xs text-slate-500 mb-1">PASSWORD</label>
+                                <input type="password" className="coder-input w-full p-2 rounded" value={pass} onChange={e=>setPass(e.target.value)} />
+                            </div>
+                            {error && <div className="text-red-400 text-xs text-center">{error}</div>}
+                            <button disabled={loading} className="coder-btn primary w-full py-2">
+                                {loading ? 'ACCESSING...' : 'LOGIN'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
         function App() {
+            const [token, setToken] = useState(localStorage.getItem('seaauto_token'));
             const [workerUrl] = useState(DEFAULT_WORKER_URL);
             const [tab, setTab] = useState('console');
             const [sidebarVisible, setSidebarVisible] = useState(true);
@@ -95,15 +137,10 @@
             const [loading, setLoading] = useState(false);
             const [clock, setClock] = useState('');
 
-            // MCP Inspector State
-            const [selectedTool, setSelectedTool] = useState(MCP_TOOLS[0].name);
-            const [toolArgs, setToolArgs] = useState(MCP_TOOLS[0].params);
-            const [toolResult, setToolResult] = useState(null);
-            const [toolLoading, setToolLoading] = useState(false);
-
             // Inputs
-            const [manual, setManual] = useState({ id: '', msg: '', title: '', description: '', type: 'text' });
+            const [manual, setManual] = useState({ id: '', msg: '', title: '', description: '', type: 'text', image: null });
             const [chatMsg, setChatMsg] = useState('');
+            const [chatImage, setChatImage] = useState(null);
             const [chatRecipient, setChatRecipient] = useState(''); 
             const [editing, setEditing] = useState(null);
 
@@ -114,16 +151,26 @@
             const editorInputRef = useRef(null);
             const editorDescRef = useRef(null);
 
-            // API Wrapper
+            // API Wrapper with Auth
             const api = async (path, opts = {}) => {
+                if (!token) return null;
                 try {
                     const base = workerUrl.endsWith('/') ? workerUrl.slice(0, -1) : workerUrl;
-                    const res = await fetch(`${base}${path}`, opts);
+                    const headers = opts.headers || {};
+                    headers['Authorization'] = `Bearer ${token}`;
+                    
+                    const res = await fetch(`${base}${path}`, { ...opts, headers });
+                    if(res.status === 401) {
+                        setToken(null);
+                        localStorage.removeItem('seaauto_token');
+                        return null;
+                    }
                     return await res.json();
                 } catch(e) { console.error(path, e); return null; }
             };
 
             const refresh = async (silent = false) => {
+                if(!token) return;
                 if(!silent) setLoading(true);
                 const [cfg, sts, grp, ch, lg] = await Promise.all([
                     api('/api/config'),
@@ -150,8 +197,42 @@
                 return () => clearInterval(tick);
             }, []);
 
-            useEffect(() => { refresh(); const i = setInterval(() => refresh(true), 5000); return () => clearInterval(i); }, []);
+            useEffect(() => { 
+                if(token) {
+                    refresh(); 
+                    const i = setInterval(() => refresh(true), 5000); 
+                    return () => clearInterval(i); 
+                }
+            }, [token]);
+
             useEffect(() => { if(tab === 'chat' && chatEndRef.current) chatEndRef.current.scrollIntoView(); }, [chatHistory, tab]);
+
+            // --- IMAGE PASTE HANDLER ---
+            const handlePaste = (e, setImageState) => {
+                const items = e.clipboardData.items;
+                for (let i = 0; i < items.length; i++) {
+                    if (items[i].type.indexOf('image') !== -1) {
+                        const blob = items[i].getAsFile();
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                            setImageState(event.target.result); // Base64
+                        };
+                        reader.readAsDataURL(blob);
+                        e.preventDefault(); // Prevent default paste if image
+                        return;
+                    }
+                }
+            };
+
+            // --- IMAGE UPLOAD HELPER ---
+            const uploadImage = async (base64) => {
+                const res = await api('/api/upload', {
+                    method: 'POST',
+                    body: JSON.stringify({ imageBase64: base64 })
+                });
+                if (res && res.success && res.file_id) return res.file_id;
+                throw new Error(res?.error || "Image Upload Failed");
+            };
 
             // Insert Helper
             const insertText = (ref, valSetter, currentVal, before, after = '') => {
@@ -183,7 +264,6 @@
                 const res = await api('/api/reset', { method: 'POST' });
                 
                 if(res && res.success) {
-                    // Reset Local State
                     setConfig({ tasks: [], isRunning: false });
                     setChatHistory([]);
                     setLogs([]);
@@ -196,106 +276,121 @@
 
             const sendManual = async () => {
                 if(!manual.id) return alert("Target Group is required");
-                if(manual.type === 'text' && !manual.msg) return alert("Message content required");
-                if(manual.type === 'interactive' && (!manual.title || !manual.description)) return alert("Title and Description required");
-
-                let payload = manual.msg;
                 
-                if (manual.type === 'interactive') {
-                    // Correct Structure based on MCP Docs/README
-                    payload = {
-                        tag: "interactive_message",
-                        interactive_message: {
-                            elements: [
-                                { 
-                                    tag: "header", 
-                                    text: { content: manual.title, tag: "plain_text" } 
-                                },
-                                { 
-                                    tag: "section", 
-                                    text: { content: manual.description, tag: "plain_text" } 
-                                }
-                            ]
-                        }
-                    };
-                }
+                setLoading(true);
+                try {
+                    let payload;
 
-                await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: payload }) });
-                setManual({ ...manual, msg: '', title: '', description: '' });
-                refresh(true);
+                    if (manual.image) {
+                        const fileId = await uploadImage(manual.image);
+                        payload = {
+                            tag: "image",
+                            image: { file_id: fileId }
+                        };
+                        // Note: SeaTalk sends image independently. If there's text, we might need 2 calls.
+                        // For simplicity, if image exists, we send image.
+                    } else if (manual.type === 'interactive') {
+                         payload = {
+                            tag: "interactive_message",
+                            interactive_message: {
+                                elements: [
+                                    { tag: "header", text: { content: manual.title, tag: "plain_text" } },
+                                    { tag: "section", text: { content: manual.description, tag: "plain_text" } }
+                                ]
+                            }
+                        };
+                    } else {
+                        if(!manual.msg) throw new Error("Message content required");
+                        payload = manual.msg;
+                    }
+
+                    const res = await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: payload }) });
+                    if(res && res.success) {
+                        setManual({ ...manual, msg: '', title: '', description: '', image: null });
+                        refresh(true);
+                    } else {
+                        alert("Send Failed");
+                    }
+                } catch(e) {
+                    alert(e.message);
+                }
+                setLoading(false);
             };
 
             const sendChat = async () => {
-                if(!chatRecipient || !chatMsg) return;
-                await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: chatMsg }) });
-                setChatMsg('');
-                refresh(true);
-            };
-
-            // --- MCP TOOL ACTIONS ---
-            const runTool = async () => {
-                setToolLoading(true);
-                setToolResult(null);
+                if(!chatRecipient) return;
+                
                 try {
-                    const args = JSON.parse(toolArgs);
-                    const res = await api('/api/mcp', { 
-                        method: 'POST', 
-                        body: JSON.stringify({ tool: selectedTool, args: args }) 
-                    });
-                    setToolResult(res);
-                } catch(e) {
-                    setToolResult({ error: "Invalid JSON format or Network Error", details: e.message });
-                }
-                setToolLoading(false);
-            };
+                    let payload;
+                    if(chatImage) {
+                        const fileId = await uploadImage(chatImage);
+                        payload = { tag: "image", image: { file_id: fileId } };
+                        setChatImage(null); // Clear after upload setup
+                    } else if (chatMsg) {
+                        payload = chatMsg;
+                        setChatMsg('');
+                    } else {
+                        return; // Nothing to send
+                    }
 
-            const handleToolChange = (e) => {
-                const name = e.target.value;
-                setSelectedTool(name);
-                const toolDef = MCP_TOOLS.find(t => t.name === name);
-                if(toolDef) setToolArgs(toolDef.params);
+                    await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: payload }) });
+                    refresh(true);
+                } catch(e) {
+                    alert("Chat Send Error: " + e.message);
+                }
             };
 
             const saveTask = async () => {
-                // Ensure times is an array
                 const times = editing.times && editing.times.length > 0 ? editing.times : [editing.time];
                 const mainTime = times[0] || "00:00";
 
-                // Construct Payload
-                let finalMsg = editing.message;
-                if (editing.type === 'interactive') {
-                    finalMsg = JSON.stringify({
-                        tag: "interactive_message",
-                        interactive_message: {
-                            elements: [
-                                { 
-                                    tag: "header", 
-                                    text: { content: editing.title || "Notification", tag: "plain_text" } 
-                                },
-                                { 
-                                    tag: "section", 
-                                    text: { content: editing.description || "", tag: "plain_text" } 
-                                }
-                            ]
-                        }
-                    });
-                }
+                try {
+                    let finalMsg = editing.message;
 
-                const task = { 
-                    ...editing, 
-                    time: mainTime, // Keep for backward compatibility
-                    times: times,   // New Array support
-                    message: finalMsg,
-                    groupName: groups.find(g=>g.id === editing.groupId)?.name || editing.groupId
-                };
-                
-                const newTasks = [...(config.tasks||[])];
-                const idx = newTasks.findIndex(x=>x.id === task.id);
-                if(idx > -1) newTasks[idx] = task; else newTasks.push(task);
-                
-                await api('/api/config', { method: 'POST', body: JSON.stringify({ ...config, tasks: newTasks }) });
-                setEditing(null);
-                refresh(true);
+                    // Handle Image Task
+                    if (editing.image) {
+                        // Check if it's already a file_id (from previous save) or new base64
+                        if (editing.image.startsWith('data:')) {
+                            const fileId = await uploadImage(editing.image);
+                            finalMsg = JSON.stringify({ tag: "image", image: { file_id: fileId } });
+                        } else {
+                             // Assuming it's already processed or we don't re-upload if not changed? 
+                             // For simplicity, if it's a new task with image, we upload.
+                             // If editing and didn't change image, we might need to store the raw payload.
+                             // Currently, let's assume we re-upload or parse existing JSON payload if not Base64.
+                        }
+                    } else if (editing.type === 'interactive') {
+                        finalMsg = JSON.stringify({
+                            tag: "interactive_message",
+                            interactive_message: {
+                                elements: [
+                                    { tag: "header", text: { content: editing.title || "Notification", tag: "plain_text" } },
+                                    { tag: "section", text: { content: editing.description || "", tag: "plain_text" } }
+                                ]
+                            }
+                        });
+                    }
+
+                    const task = { 
+                        ...editing, 
+                        time: mainTime, 
+                        times: times,   
+                        message: finalMsg,
+                        groupName: groups.find(g=>g.id === editing.groupId)?.name || editing.groupId,
+                        // Don't save base64 string to KV to save space, rely on message payload
+                        image: null 
+                    };
+                    
+                    const newTasks = [...(config.tasks||[])];
+                    const idx = newTasks.findIndex(x=>x.id === task.id);
+                    if(idx > -1) newTasks[idx] = task; else newTasks.push(task);
+                    
+                    await api('/api/config', { method: 'POST', body: JSON.stringify({ ...config, tasks: newTasks }) });
+                    setEditing(null);
+                    refresh(true);
+                } catch(e) {
+                    alert("Save Error: " + e.message);
+                }
             };
 
             const deleteTask = async (id) => {
@@ -318,7 +413,8 @@
                     description: '', 
                     title: '', 
                     type: 'text', 
-                    enabled: true 
+                    enabled: true,
+                    image: null
                 });
             };
             
@@ -328,7 +424,6 @@
                 let title = '';
                 let desc = '';
                 
-                // Parse Times
                 const times = t.times || [t.time];
 
                 try {
@@ -340,36 +435,37 @@
                         const sectionEl = els.find(e => e.tag === 'section');
                         title = headerEl?.text?.content || '';
                         desc = sectionEl?.text?.content || '';
+                    } else if (obj.tag === 'image') {
+                        type = 'text'; // Visual fallback
+                        msg = JSON.stringify(obj); // Show raw JSON for image tasks if editing
                     }
                 } catch(e) {}
 
                 setEditing({ ...t, type, message: msg, title, description: desc, times });
             }
 
-            // --- Multi-Trigger Editor Logic ---
-            const addTriggerTime = () => {
-                const now = new Date();
-                const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-                setEditing({...editing, times: [...(editing.times || []), currentTime]});
-            };
-
-            const removeTriggerTime = (idx) => {
-                const newTimes = editing.times.filter((_, i) => i !== idx);
-                setEditing({...editing, times: newTimes});
-            };
-
+            const addTriggerTime = () => setEditing({...editing, times: [...(editing.times || []), "09:00"]});
+            const removeTriggerTime = (idx) => setEditing({...editing, times: editing.times.filter((_, i) => i !== idx)});
             const updateTriggerTime = (idx, val) => {
                 const newTimes = [...editing.times];
                 newTimes[idx] = val;
                 setEditing({...editing, times: newTimes});
             };
 
-            // Components
             const SidebarItem = ({ id, icon, label }) => (
                 <button onClick={() => setTab(id)} className={`w-full text-left p-3 flex items-center gap-3 text-sm font-bold hover:bg-slate-800 ${tab === id ? 'tab-active' : 'text-slate-400'}`}>
                     <span className="material-icons-outlined text-lg">{icon}</span> {label}
                 </button>
             );
+
+            // --- RENDER ---
+
+            if (!token) {
+                return <Login onLogin={(t) => {
+                    localStorage.setItem('seaauto_token', t);
+                    setToken(t);
+                }} />;
+            }
 
             return (
                 <div className="flex h-screen w-full relative">
@@ -391,11 +487,11 @@
                             <SidebarItem id="console" icon="dvr" label="Console" />
                             <SidebarItem id="chat" icon="chat" label="Live Chat" />
                             <SidebarItem id="cron" icon="schedule" label="Cron Jobs" />
-                            <SidebarItem id="tools" icon="build" label="MCP Inspector" />
                         </div>
                         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 font-mono">
                             <div>CLOCK: {clock}</div>
                             <div className={config.isRunning ? "text-green-500" : "text-red-500"}>{config.isRunning ? "● RUNNING" : "○ STOPPED"}</div>
+                            <button onClick={()=>{setToken(null);localStorage.removeItem('seaauto_token');}} className="mt-2 text-red-400 hover:underline">LOGOUT</button>
                         </div>
                     </div>
 
@@ -459,19 +555,27 @@
                                             </div>
                                         ) : (
                                             <div>
-                                                <label className="block text-xs text-slate-500 mb-1">CONTENT</label>
+                                                <label className="block text-xs text-slate-500 mb-1">CONTENT (Paste Image Supported)</label>
+                                                {manual.image && (
+                                                    <div className="relative inline-block mb-2">
+                                                        <img src={manual.image} className="img-preview" />
+                                                        <button onClick={()=>setManual({...manual, image:null})} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">×</button>
+                                                    </div>
+                                                )}
                                                 <Toolbar insert={(b,a)=>insertText(manualInputRef, (v)=>setManual({...manual, msg:v}), manual.msg, b, a)} />
-                                                <textarea ref={manualInputRef} className="coder-input w-full p-3 text-sm font-mono h-24 rounded" 
+                                                <textarea ref={manualInputRef} 
+                                                    className="coder-input w-full p-3 text-sm font-mono h-24 rounded" 
                                                     value={manual.msg} 
                                                     onChange={e=>setManual({...manual, msg:e.target.value})}
-                                                    placeholder="Type message here..."
+                                                    onPaste={e=>handlePaste(e, (img)=>setManual({...manual, image:img}))}
+                                                    placeholder="Type message or paste image here..."
                                                 ></textarea>
                                             </div>
                                         )}
 
                                         <div className="flex justify-end">
-                                            <button onClick={sendManual} className="coder-btn primary">
-                                                <span className="material-icons-outlined text-sm">send</span> EXECUTE
+                                            <button onClick={sendManual} disabled={loading} className="coder-btn primary">
+                                                <span className="material-icons-outlined text-sm">send</span> {loading ? 'SENDING...' : 'EXECUTE'}
                                             </button>
                                         </div>
                                     </div>
@@ -538,53 +642,22 @@
                                 </div>
                                 <div className="p-4 bg-slate-800 border-t border-slate-700">
                                     {chatRecipient && <div className="text-xs text-blue-400 mb-2 font-mono flex items-center gap-2">TARGET: <span className="bg-blue-900/50 px-2 rounded">{chatRecipient}</span> <button onClick={()=>setChatRecipient('')} className="text-red-400 hover:underline">CLEAR</button></div>}
+                                    {chatImage && (
+                                        <div className="relative inline-block mb-2">
+                                            <img src={chatImage} className="img-preview" />
+                                            <button onClick={()=>setChatImage(null)} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">×</button>
+                                        </div>
+                                    )}
                                     <Toolbar insert={(b,a)=>insertText(chatInputRef, setChatMsg, chatMsg, b, a)} />
                                     <div className="flex gap-2 mt-2">
                                         <textarea ref={chatInputRef} className="coder-input flex-1 p-2 text-sm rounded h-12 resize-none" 
                                             value={chatMsg} onChange={e=>setChatMsg(e.target.value)} 
+                                            onPaste={e=>handlePaste(e, setChatImage)}
                                             onKeyDown={e=>e.key==='Enter' && !e.shiftKey && (e.preventDefault(), sendChat())}
-                                            placeholder={chatRecipient ? "Type reply..." : "Select a message to reply..."}
+                                            placeholder={chatRecipient ? "Type reply or paste image..." : "Select a message to reply..."}
                                             disabled={!chatRecipient}
                                         />
                                         <button onClick={sendChat} disabled={!chatRecipient} className="coder-btn primary h-12 w-16">SEND</button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* MCP INSPECTOR */}
-                        {tab === 'tools' && (
-                            <div className="p-4 md:p-8 space-y-6 pt-16 md:pt-8 overflow-y-auto max-w-7xl mx-auto w-full">
-                                <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-4 mb-4">MCP_INSPECTOR</h2>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-200px)]">
-                                    {/* Config Column */}
-                                    <div className="coder-card p-4 flex flex-col gap-4">
-                                        <div className="font-bold text-blue-400 border-b border-slate-700 pb-2">REQUEST</div>
-                                        <div>
-                                            <label className="block text-xs text-slate-500 mb-1">SELECT_TOOL</label>
-                                            <select className="coder-input w-full p-2 rounded text-sm" value={selectedTool} onChange={handleToolChange}>
-                                                {MCP_TOOLS.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="flex-1 flex flex-col">
-                                            <label className="block text-xs text-slate-500 mb-1">ARGUMENTS (JSON)</label>
-                                            <textarea className="coder-input w-full flex-1 p-3 font-mono text-xs rounded resize-none" 
-                                                value={toolArgs} 
-                                                onChange={e=>setToolArgs(e.target.value)}
-                                            />
-                                        </div>
-                                        <button onClick={runTool} disabled={toolLoading} className="coder-btn primary h-10 font-bold">
-                                            {toolLoading ? 'RUNNING...' : 'EXECUTE TOOL'}
-                                        </button>
-                                    </div>
-
-                                    {/* Output Column */}
-                                    <div className="coder-card p-4 flex flex-col gap-4 bg-black/50">
-                                        <div className="font-bold text-green-400 border-b border-slate-700 pb-2">RESPONSE</div>
-                                        <div className="flex-1 overflow-auto font-mono text-xs text-slate-300 p-2 border border-slate-800 rounded bg-[#0f172a]">
-                                            {toolResult ? JSON.stringify(toolResult, null, 2) : "// Result will appear here..."}
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -690,9 +763,21 @@
                                     </div>
                                 ) : (
                                     <div>
-                                        <label className="block text-xs text-slate-500 mb-1">PAYLOAD</label>
+                                        <label className="block text-xs text-slate-500 mb-1">PAYLOAD (Paste Image Supported)</label>
+                                        {editing.image && (
+                                            <div className="relative inline-block mb-2">
+                                                <img src={editing.image} className="img-preview" />
+                                                <button onClick={()=>setEditing({...editing, image:null})} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">×</button>
+                                            </div>
+                                        )}
                                         <Toolbar insert={(b,a)=>insertText(editorInputRef, (v)=>setEditing({...editing, message:v}), editing.message, b, a)} />
-                                        <textarea ref={editorInputRef} className="coder-input w-full p-3 h-32 rounded font-mono text-xs" value={editing.message} onChange={e=>setEditing({...editing, message:e.target.value})} placeholder="Message..."></textarea>
+                                        <textarea ref={editorInputRef} 
+                                            className="coder-input w-full p-3 h-32 rounded font-mono text-xs" 
+                                            value={editing.message} 
+                                            onChange={e=>setEditing({...editing, message:e.target.value})} 
+                                            onPaste={e=>handlePaste(e, (img)=>setEditing({...editing, image:img}))}
+                                            placeholder="Message or paste image..."
+                                        ></textarea>
                                     </div>
                                 )}
                                 
