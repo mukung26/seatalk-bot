@@ -78,12 +78,6 @@
             const [loading, setLoading] = useState(false);
             const [clock, setClock] = useState('');
 
-            // Tools State
-            const [empQuery, setEmpQuery] = useState('');
-            const [empResult, setEmpResult] = useState(null);
-            const [histGroup, setHistGroup] = useState('');
-            const [histResult, setHistResult] = useState(null);
-
             // Inputs
             const [manual, setManual] = useState({ id: '', msg: '', title: '', description: '', type: 'text' });
             const [chatMsg, setChatMsg] = useState('');
@@ -189,19 +183,6 @@
                 refresh(true);
             };
 
-            // --- TOOL ACTIONS ---
-            const lookupEmployee = async () => {
-                if(!empQuery) return;
-                const res = await api('/api/tools/employee', { method: 'POST', body: JSON.stringify({ query: empQuery.trim() }) });
-                setEmpResult(res);
-            };
-
-            const fetchHistory = async () => {
-                if(!histGroup) return;
-                const res = await api('/api/tools/history', { method: 'POST', body: JSON.stringify({ groupId: histGroup }) });
-                setHistResult(res);
-            };
-
             const saveTask = async () => {
                 const now = new Date();
                 const t = editing.time || `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
@@ -250,6 +231,7 @@
             };
             
             const editTask = (t) => {
+                // Deconstruct message if possible
                 let type = 'text';
                 let msg = t.message;
                 let title = '';
@@ -262,6 +244,9 @@
                         const els = obj.interactive_message?.elements || [];
                         title = els.find(e=>e.element_type==='title')?.title?.text || '';
                         desc = els.find(e=>e.element_type==='description')?.description?.text || '';
+                    } else if (obj.tag === 'image' || obj.tag === 'file') {
+                        // Keep raw for now as user requested simplicity
+                        msg = t.message;
                     }
                 } catch(e) {}
 
@@ -295,7 +280,6 @@
                             <SidebarItem id="console" icon="dvr" label="Console" />
                             <SidebarItem id="chat" icon="chat" label="Live Chat" />
                             <SidebarItem id="cron" icon="schedule" label="Cron Jobs" />
-                            <SidebarItem id="tools" icon="build" label="Tools (MCP)" />
                         </div>
                         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 font-mono">
                             <div>CLOCK: {clock}</div>
@@ -442,74 +426,6 @@
                                             disabled={!chatRecipient}
                                         />
                                         <button onClick={sendChat} disabled={!chatRecipient} className="coder-btn primary h-12 w-16">SEND</button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* TOOLS (MCP) */}
-                        {tab === 'tools' && (
-                            <div className="p-4 md:p-8 space-y-6 pt-16 md:pt-8 overflow-y-auto max-w-7xl mx-auto w-full">
-                                <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-4 mb-4">MCP_INTEGRATION_TOOLS</h2>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {/* Employee Inspector */}
-                                    <div className="coder-card p-4 space-y-4">
-                                        <div className="flex justify-between border-b border-slate-700 pb-2">
-                                            <div className="font-bold text-blue-400">EMPLOYEE_INSPECTOR</div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <input className="coder-input flex-1 p-2 rounded text-sm" placeholder="Email or Code..." value={empQuery} onChange={e=>setEmpQuery(e.target.value)} />
-                                            <button onClick={lookupEmployee} className="coder-btn primary">SEARCH</button>
-                                        </div>
-                                        <div className="h-64 bg-black rounded p-2 overflow-auto font-mono text-xs border border-slate-800 text-green-400">
-                                            {empResult ? JSON.stringify(empResult, null, 2) : "// Result will appear here..."}
-                                        </div>
-                                    </div>
-
-                                    {/* Group History */}
-                                    <div className="coder-card p-4 space-y-4">
-                                        <div className="flex justify-between border-b border-slate-700 pb-2">
-                                            <div className="font-bold text-blue-400">GROUP_ARCHIVES</div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <select className="coder-input flex-1 p-2 rounded text-sm" value={histGroup} onChange={e=>setHistGroup(e.target.value)}>
-                                                <option value="">-- Select Group --</option>
-                                                {groups.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
-                                            </select>
-                                            <button onClick={fetchHistory} className="coder-btn primary">FETCH</button>
-                                        </div>
-                                        <div className="h-64 bg-black rounded p-2 overflow-auto font-mono text-xs border border-slate-800 text-slate-300">
-                                            {histResult?.messages ? (
-                                                histResult.messages.map((m, i) => (
-                                                    <div key={i} className="mb-2 border-b border-slate-900 pb-1">
-                                                        <span className="text-blue-500">[{new Date(m.created_at * 1000).toLocaleTimeString()}]</span> <span className="font-bold text-slate-200">{m.sender.name}:</span>
-                                                        <div className="pl-4 text-slate-400">{m.text?.plain_text || `[${m.tag}]`}</div>
-                                                    </div>
-                                                ))
-                                            ) : "// Select Group to fetch history..."}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* MCP Config Generator */}
-                                <div className="coder-card p-4">
-                                    <div className="font-bold text-slate-400 mb-2">CURSOR_MCP_CONFIG</div>
-                                    <div className="text-xs text-slate-500 mb-2">Copy this configuration into your Cursor MCP settings to enable direct AI integration.</div>
-                                    <div className="bg-black p-4 rounded border border-slate-800 font-mono text-xs text-slate-400 relative group">
-                                        <pre>{JSON.stringify({
-                                            "mcpServers": {
-                                                "seatalk-mcp-server": {
-                                                    "command": "npx",
-                                                    "args": ["-y", "seatalk-mcp-server"],
-                                                    "env": {
-                                                        "SEATALK_APP_ID": "ODQ0MjM4MDQyMjE5",
-                                                        "SEATALK_APP_SECRET": "YOUR_SECRET_HERE"
-                                                    },
-                                                    "disabled": false
-                                                }
-                                            }
-                                        }, null, 2)}</pre>
                                     </div>
                                 </div>
                             </div>
