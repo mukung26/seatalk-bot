@@ -59,7 +59,6 @@
             
             // Data State
             const [config, setConfig] = useState({ tasks: [], isRunning: false });
-            const [groups, setGroups] = useState([]);
             const [status, setStatus] = useState({ lastHeartbeat: '...', kvStatus: '...' });
             const [clock, setClock] = useState('--:--:--');
             const [loading, setLoading] = useState(false);
@@ -69,16 +68,17 @@
             const [chatRecipient, setChatRecipient] = useState('');
             const [chatMsg, setChatMsg] = useState('');
             const chatEndRef = useRef(null);
+            const chatInputRef = useRef(null);
             
             // Manual Send
-            const [manual, setManual] = useState({ id: '', msg: '', type: 'text' });
+            const [manual, setManual] = useState({ id: '', msg: '' });
             
             // Modals
             const [editing, setEditing] = useState(null); 
             const [modal, setModal] = useState(null); 
             
             // Refs
-            const textareaRef = useRef(null);
+            const manualTextareaRef = useRef(null);
             const modalTextareaRef = useRef(null);
 
             // API Helper
@@ -100,6 +100,18 @@
                 let newVal = isWrapped ? val.substring(0, start-before.length) + sel + val.substring(end+after.length) 
                                        : val.substring(0, start) + before + sel + after + val.substring(end);
                 setter(newVal);
+                setTimeout(() => {
+                    el.focus();
+                    const newCursor = isWrapped ? start - before.length : start + before.length;
+                    el.setSelectionRange(newCursor, newCursor + sel.length);
+                }, 0);
+            };
+            
+            const insertMention = (ref, setter, val, type) => {
+                let tag = '';
+                if(type === 'all') tag = '<mention-tag target="seatalk://user?id=0"/>';
+                else if(type === 'email') tag = '<mention-tag target="seatalk://user?email=test@example.com"/>';
+                insertFormat(ref, setter, val, tag);
             };
 
             const refresh = async (silent = false) => {
@@ -113,10 +125,6 @@
                     setConfig(cfg || { tasks: [], isRunning: false });
                     setStatus(prev => ({ ...prev, lastHeartbeat: sts.lastHeartbeat, kvStatus: sts.kvStatus }));
                     if (Array.isArray(chats)) setChatHistory(chats);
-                    
-                    // Fetch groups separately to not block
-                    apiCall('/api/groups').then(g => Array.isArray(g) && setGroups(g)).catch(()=>{});
-
                     setIsConnected(true);
                 } catch(e) { 
                     if(!silent) console.error("Connection Error", e);
@@ -134,7 +142,7 @@
             }, []);
 
             // Auto-scroll chat
-            useEffect(() => { if (tab === 'chat' && chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, tab]);
+            useEffect(() => { if (tab === 'chat' && chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, tab, chatRecipient]);
 
             const saveConfig = async (newCfg) => {
                 setConfig(newCfg);
@@ -151,23 +159,22 @@
             };
 
             const sendManual = async () => {
-                if(!manual.id || !manual.msg) return setModal({title:"Error", content:"Missing fields", type:'error'});
-                let finalMsg = manual.msg;
-                if(manual.type === 'image') finalMsg = JSON.stringify({ tag: "image", image: { file_id: manual.msg.trim() }});
-                else if(manual.type === 'file') finalMsg = JSON.stringify({ tag: "file", file: { file_id: manual.msg.trim() }});
-                
+                if(!manual.id || !manual.msg) return setModal({title:"Error", content:"Missing Group ID or Message", type:'error'});
                 try {
-                    await apiCall('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: finalMsg }) });
-                    setModal({title:"Sent", content:"Message sent", type:'success'});
+                    await apiCall('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: manual.msg }) });
+                    setModal({title:"Sent", content:"Message sent to group", type:'success'});
                     setManual({...manual, msg:''});
                 } catch(e) { setModal({title:"Error", content:e.message, type:'error'}); }
             };
 
             const Toolbar = ({ setter, val, textRef }) => (
-                <div className="flex gap-1 mb-2 bg-slate-50 p-1 rounded-lg overflow-x-auto">
-                    <button onClick={()=>insertFormat(textRef, (v)=>setter(prev=>({...prev, message:v})), val, '**','**')} className="p-2 hover:bg-white rounded"><span className="material-icons-outlined text-sm">format_bold</span></button>
-                    <button onClick={()=>insertFormat(textRef, (v)=>setter(prev=>({...prev, message:v})), val, '*','*')} className="p-2 hover:bg-white rounded"><span className="material-icons-outlined text-sm">format_italic</span></button>
-                    <button onClick={()=>insertFormat(textRef, (v)=>setter(prev=>({...prev, message:v})), val, '<mention-tag target="seatalk://user?id=0"/>')} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded font-bold">@All</button>
+                <div className="flex gap-1 mb-2 bg-slate-50 p-1 rounded-lg overflow-x-auto no-scrollbar">
+                    <button onClick={()=>insertFormat(textRef, (v)=>setter(v), val, '**','**')} className="p-2 hover:bg-white rounded min-w-[32px]" title="Bold"><span className="material-icons-outlined text-sm">format_bold</span></button>
+                    <button onClick={()=>insertFormat(textRef, (v)=>setter(v), val, '*','*')} className="p-2 hover:bg-white rounded min-w-[32px]" title="Italic"><span className="material-icons-outlined text-sm">format_italic</span></button>
+                    <button onClick={()=>insertFormat(textRef, (v)=>setter(v), val, '`','`')} className="p-2 hover:bg-white rounded min-w-[32px]" title="Code"><span className="material-icons-outlined text-sm">code</span></button>
+                    <div className="w-px h-4 bg-gray-300 mx-1 flex-shrink-0 self-center"></div>
+                    <button onClick={()=>insertMention(textRef, (v)=>setter(v), val, 'all')} className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded font-bold whitespace-nowrap">@All</button>
+                    <button onClick={()=>insertMention(textRef, (v)=>setter(v), val, 'email')} className="px-2 py-1 bg-gray-200 text-gray-800 text-xs rounded font-bold whitespace-nowrap">@Email</button>
                 </div>
             );
 
@@ -181,8 +188,26 @@
 
             const saveTask = () => {
                 if (!editing.name || !editing.groupId || !editing.time) return alert("Fill required fields");
+                
                 let finalMsg = editing.message;
-                // Parse if needed or wrap
+                
+                // Construct Interactive/Media Messages
+                if (editing.type === 'interactive') {
+                    finalMsg = JSON.stringify({
+                        tag: "interactive_message",
+                        interactive_message: {
+                            elements: [
+                                { element_type: "title", title: { text: editing.interactiveTitle || "Notification" } },
+                                { element_type: "description", description: { format: 1, text: editing.message || "" } }
+                            ]
+                        }
+                    });
+                } else if (editing.type === 'image') {
+                    finalMsg = JSON.stringify({ tag: "image", image: { file_id: editing.message.trim() } });
+                } else if (editing.type === 'file') {
+                    finalMsg = JSON.stringify({ tag: "file", file: { file_id: editing.message.trim() } });
+                }
+
                 const newTask = { ...editing, message: finalMsg };
                 
                 let newTasks = [...(config.tasks || [])];
@@ -193,12 +218,39 @@
                 setEditing(null);
             };
 
+            // Parse existing task message to determine type for UI
+            const openEditModal = (task) => {
+                let type = 'text';
+                let content = task.message;
+                let title = '';
+
+                try {
+                    const obj = JSON.parse(task.message);
+                    if (obj.tag === 'interactive_message') {
+                        type = 'interactive';
+                        const els = obj.interactive_message?.elements || [];
+                        const tEl = els.find(e => e.element_type === 'title');
+                        const dEl = els.find(e => e.element_type === 'description');
+                        if (tEl) title = tEl.title.text;
+                        if (dEl) content = dEl.description.text;
+                    } else if (obj.tag === 'image') {
+                        type = 'image';
+                        content = obj.image.file_id;
+                    } else if (obj.tag === 'file') {
+                        type = 'file';
+                        content = obj.file.file_id;
+                    }
+                } catch(e) {}
+
+                setEditing({ ...task, type, message: content, interactiveTitle: title });
+            };
+
             if (!isConnected && loading) return <div className="h-screen flex items-center justify-center"><div className="w-8 h-8 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div></div>;
 
             return (
                 <div className="flex h-[100dvh] bg-[#f0f4f8] overflow-hidden flex-col md:flex-row">
                     
-                    {/* SIDEBAR (Desktop) / BOTTOM BAR (Mobile) */}
+                    {/* SIDEBAR */}
                     <aside className="hidden md:flex flex-col fixed top-0 bottom-0 left-0 w-64 bg-white border-r border-gray-200 z-30">
                         <div className="h-16 flex items-center px-6">
                              <span className="material-icons-outlined text-blue-600 text-3xl mr-2">cloud_circle</span>
@@ -245,7 +297,6 @@
                             {tab === 'status' && (
                                 <div className="space-y-4 animate-fade-in">
                                     <h2 className="text-2xl font-bold text-gray-800 md:hidden mb-4">SeaAuto</h2>
-                                    
                                     <div className="m3-card p-6 bg-white flex flex-col items-center text-center">
                                         <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${config.isRunning ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
                                             <span className="material-icons-outlined text-3xl">power_settings_new</span>
@@ -255,19 +306,6 @@
                                         <button onClick={()=>saveConfig({...config, isRunning: !config.isRunning})} className={`px-8 py-3 rounded-full font-bold shadow-md transition-all ${config.isRunning ? 'bg-white border border-red-200 text-red-600 hover:bg-red-50' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
                                             {config.isRunning ? 'Stop Engine' : 'Start Engine'}
                                         </button>
-                                    </div>
-
-                                    <div className="m3-card p-5">
-                                        <div className="flex justify-between items-center mb-4">
-                                            <h3 className="font-bold text-gray-700">Health</h3>
-                                            <div className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500">{status.kvStatus}</div>
-                                        </div>
-                                        <div className="flex items-center gap-3 mb-2">
-                                            <span className="material-icons-outlined text-gray-400">favorite</span>
-                                            <div className="text-sm">
-                                                <span className="text-gray-500">Last Heartbeat:</span> <span className="font-mono font-bold text-gray-700">{status.lastHeartbeat}</span>
-                                            </div>
-                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -280,7 +318,7 @@
                                         <button onClick={()=>setEditing({id: Date.now(), name:'New Task', time:'09:00', groupId:'', message:'', type:'text', enabled:true})} className="bg-blue-600 text-white w-10 h-10 rounded-full shadow flex items-center justify-center"><span className="material-icons-outlined">add</span></button>
                                     </div>
                                     {config.tasks?.map(t => (
-                                        <div key={t.id} onClick={()=>setEditing(t)} className="m3-card p-4 flex items-center gap-3 cursor-pointer hover:border-blue-300 transition">
+                                        <div key={t.id} onClick={()=>openEditModal(t)} className="m3-card p-4 flex items-center gap-3 cursor-pointer hover:border-blue-300 transition">
                                             <div className="w-12 h-12 bg-blue-50 rounded-xl flex flex-col items-center justify-center text-blue-700 font-bold leading-none">
                                                 <span>{t.time.split(':')[0]}</span><span className="text-xs">{t.time.split(':')[1]}</span>
                                             </div>
@@ -297,6 +335,15 @@
                             {/* CHAT */}
                             {tab === 'chat' && (
                                 <div className="flex flex-col h-[calc(100vh-80px)] md:h-[calc(100vh-60px)] -m-4 md:m-0 bg-white md:rounded-2xl md:shadow-sm border border-gray-200">
+                                    <div className="p-3 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                                        <h3 className="font-bold text-gray-700 flex items-center gap-2"><span className="material-icons-outlined">forum</span> Live Chat</h3>
+                                        <button onClick={()=>{
+                                            const email = prompt("Enter Employee Email:");
+                                            if(email && email.includes('@')) setChatRecipient(email);
+                                        }} className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-full font-bold hover:bg-blue-200 transition">
+                                            + New Chat
+                                        </button>
+                                    </div>
                                     <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scroll bg-slate-50">
                                         {chatHistory.length === 0 && <div className="text-center text-gray-400 mt-20">No messages</div>}
                                         {chatHistory.sort((a,b)=>a.time-b.time).map((msg, i) => (
@@ -306,9 +353,8 @@
                                                     <span>{msg.senderEmail || (msg.sender && msg.sender.startsWith('e_') ? msg.sender : '')}</span>
                                                 </div>
                                                 <div onClick={() => {
-                                                    // Auto-detect reply type
                                                     let target = msg.sender;
-                                                    if(msg.senderEmail) target = msg.senderEmail; // Prefer email if available
+                                                    if(msg.senderEmail) target = msg.senderEmail; 
                                                     setChatRecipient(target);
                                                 }} className={`chat-bubble cursor-pointer ${msg.direction === 'out' ? 'out' : 'in'} shadow-sm`}>
                                                     {msg.text}
@@ -318,6 +364,8 @@
                                         ))}
                                         <div ref={chatEndRef}></div>
                                     </div>
+                                    
+                                    {/* Chat Input Area */}
                                     <div className="p-3 bg-white border-t border-gray-200">
                                         {chatRecipient && (
                                             <div className="flex justify-between bg-blue-50 px-3 py-1.5 rounded text-xs text-blue-800 mb-2">
@@ -325,24 +373,34 @@
                                                 <button onClick={()=>setChatRecipient('')}><span className="material-icons-outlined text-sm">close</span></button>
                                             </div>
                                         )}
-                                        <div className="flex gap-2">
-                                            <input className="flex-1 bg-gray-100 rounded-full px-4 py-2 outline-none" placeholder="Type..." value={chatMsg} onChange={e=>setChatMsg(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendChatReply()} />
-                                            <button onClick={sendChatReply} className="bg-blue-600 text-white w-10 h-10 rounded-full flex items-center justify-center"><span className="material-icons-outlined">send</span></button>
+                                        <div className="border border-gray-200 rounded-xl p-2 bg-gray-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-blue-500 transition-colors">
+                                            <Toolbar setter={setChatMsg} val={chatMsg} textRef={chatInputRef} />
+                                            <div className="flex gap-2 items-end">
+                                                <textarea ref={chatInputRef} className="flex-1 bg-transparent text-sm outline-none resize-none max-h-24 py-2" rows="1" placeholder={chatRecipient ? "Type reply..." : "Select a user to reply..."} value={chatMsg} onChange={e=>setChatMsg(e.target.value)} onKeyDown={e=> { if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChatReply(); } }} disabled={!chatRecipient}></textarea>
+                                                <button onClick={sendChatReply} disabled={!chatRecipient || !chatMsg.trim()} className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center mb-1 disabled:opacity-50 hover:bg-blue-700 transition"><span className="material-icons-outlined text-sm">send</span></button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             )}
 
-                            {/* MANUAL */}
+                            {/* MANUAL - GROUP ONLY */}
                             {tab === 'manual' && (
                                 <div className="m3-card p-6 space-y-4 animate-fade-in">
-                                    <h2 className="text-xl font-bold">Quick Send</h2>
+                                    <h2 className="text-xl font-bold">Quick Send (Group Only)</h2>
                                     <div>
-                                        <label className="text-xs font-bold text-gray-500 uppercase">To (Group ID or Email)</label>
-                                        <input className="w-full mt-1 bg-gray-50 border rounded-lg p-3" placeholder="e.g. 123456 or name@company.com" value={manual.id} onChange={e=>setManual({...manual, id:e.target.value})} />
+                                        <label className="text-xs font-bold text-gray-500 uppercase">Group ID</label>
+                                        <input className="w-full mt-1 bg-gray-50 border rounded-lg p-3 font-mono" placeholder="e.g. 123456789" value={manual.id} onChange={e=>setManual({...manual, id:e.target.value.replace(/\D/g,'')})} />
+                                        <p className="text-[10px] text-gray-400 mt-1">Only numeric Group IDs are supported here.</p>
                                     </div>
-                                    <textarea className="w-full bg-gray-50 border rounded-lg p-3 h-32" placeholder="Message..." value={manual.msg} onChange={e=>setManual({...manual, msg:e.target.value})}></textarea>
-                                    <button onClick={sendManual} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow">Send</button>
+                                    <div>
+                                        <label className="text-xs font-bold text-gray-500 uppercase">Message</label>
+                                        <div className="mt-1 border border-gray-200 rounded-xl p-2 bg-gray-50 focus-within:bg-white focus-within:ring-1 focus-within:ring-blue-500 transition-colors">
+                                            <Toolbar setter={(v)=>setManual({...manual, msg:v})} val={manual.msg} textRef={manualTextareaRef} />
+                                            <textarea ref={manualTextareaRef} className="w-full bg-transparent p-2 h-32 text-sm outline-none resize-none" placeholder="Type message..." value={manual.msg} onChange={e=>setManual({...manual, msg:e.target.value})}></textarea>
+                                        </div>
+                                    </div>
+                                    <button onClick={sendManual} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow hover:bg-blue-700 transition">Send to Group</button>
                                 </div>
                             )}
                         </div>
@@ -368,10 +426,33 @@
                                         <label className="text-xs font-bold text-gray-500">Group ID</label>
                                         <input className="w-full border rounded-lg p-2" value={editing.groupId} onChange={e=>setEditing({...editing, groupId:e.target.value})} placeholder="Group ID" />
                                     </div>
+                                    
                                     <div>
-                                        <div className="flex justify-between mb-1"><label className="text-xs font-bold text-gray-500">Message</label></div>
-                                        <Toolbar setter={setEditing} val={editing.message} textRef={modalTextareaRef} />
-                                        <textarea ref={modalTextareaRef} className="w-full border rounded-lg p-2 h-32 text-sm font-mono" value={editing.message} onChange={e=>setEditing({...editing, message:e.target.value})}></textarea>
+                                        <label className="text-xs font-bold text-gray-500">Message Type</label>
+                                        <select className="w-full border rounded-lg p-2 mt-1" value={editing.type} onChange={e=>setEditing({...editing, type:e.target.value})}>
+                                            <option value="text">Text Message</option>
+                                            <option value="interactive">Interactive (Title + Desc)</option>
+                                            <option value="image">Image (File ID)</option>
+                                            <option value="file">File (File ID)</option>
+                                        </select>
+                                    </div>
+
+                                    {editing.type === 'interactive' && (
+                                        <div>
+                                            <label className="text-xs font-bold text-gray-500">Title</label>
+                                            <input className="w-full border rounded-lg p-2 mb-2 font-bold" value={editing.interactiveTitle || ''} onChange={e=>setEditing({...editing, interactiveTitle:e.target.value})} placeholder="Message Title" />
+                                        </div>
+                                    )}
+
+                                    {/* Description / Content Area */}
+                                    <div>
+                                        <div className="flex justify-between mb-1"><label className="text-xs font-bold text-gray-500">{editing.type === 'interactive' ? 'Description' : (editing.type === 'text' ? 'Content' : 'File ID')}</label></div>
+                                        
+                                        {(editing.type === 'text' || editing.type === 'interactive') && (
+                                            <Toolbar setter={(v)=>setEditing({...editing, message:v})} val={editing.message} textRef={modalTextareaRef} />
+                                        )}
+                                        
+                                        <textarea ref={modalTextareaRef} className={`w-full border rounded-lg p-2 text-sm ${editing.type==='text'||editing.type==='interactive' ? 'h-32' : 'h-16 font-mono'}`} value={editing.message} onChange={e=>setEditing({...editing, message:e.target.value})} placeholder={editing.type === 'image' || editing.type === 'file' ? "Paste File ID here..." : "Type message content..."}></textarea>
                                     </div>
                                 </div>
                                 <div className="flex justify-between pt-4 mt-4 border-t border-gray-100">
@@ -385,7 +466,7 @@
                         </div>
                     )}
 
-                    {/* STATUS MODAL */}
+                    {/* ALERT MODAL */}
                     {modal && (
                         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={()=>setModal(null)}>
                             <div className="bg-white p-6 rounded-xl shadow-xl max-w-sm w-full" onClick={e=>e.stopPropagation()}>
