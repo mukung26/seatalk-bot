@@ -31,15 +31,6 @@
         .toolbar-btn { padding: 4px 8px; border-radius: 3px; font-size: 10px; background: #334155; color: #94a3b8; }
         .toolbar-btn:hover { background: #475569; color: white; }
     </style>
-<script type="importmap">
-{
-  "imports": {
-    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react/": "https://esm.sh/react@^19.2.3/"
-  }
-}
-</script>
 </head>
 <body>
     <div id="root"></div>
@@ -166,12 +157,19 @@
                 let payload = manual.msg;
                 
                 if (manual.type === 'interactive') {
+                    // Correct Structure based on MCP Docs/README
                     payload = {
                         tag: "interactive_message",
                         interactive_message: {
                             elements: [
-                                { element_type: "title", title: { text: manual.title } },
-                                { element_type: "description", description: { format: 1, text: manual.description } }
+                                { 
+                                    tag: "header", 
+                                    text: { content: manual.title, tag: "plain_text" } 
+                                },
+                                { 
+                                    tag: "section", 
+                                    text: { content: manual.description, tag: "plain_text" } 
+                                }
                             ]
                         }
                     };
@@ -209,12 +207,19 @@
                 // Construct Payload
                 let finalMsg = editing.message;
                 if (editing.type === 'interactive') {
+                    // Correct Structure based on MCP Docs/README
                     finalMsg = JSON.stringify({
                         tag: "interactive_message",
                         interactive_message: {
                             elements: [
-                                { element_type: "title", title: { text: editing.title || "Notification" } },
-                                { element_type: "description", description: { format: 1, text: editing.description || "" } }
+                                { 
+                                    tag: "header", 
+                                    text: { content: editing.title || "Notification", tag: "plain_text" } 
+                                },
+                                { 
+                                    tag: "section", 
+                                    text: { content: editing.description || "", tag: "plain_text" } 
+                                }
                             ]
                         }
                     });
@@ -260,8 +265,18 @@
                     if(obj.tag === 'interactive_message') {
                         type = 'interactive';
                         const els = obj.interactive_message?.elements || [];
-                        title = els.find(e=>e.element_type==='title')?.title?.text || '';
-                        desc = els.find(e=>e.element_type==='description')?.description?.text || '';
+                        // Correctly parsing tags based on new structure
+                        const headerEl = els.find(e => e.tag === 'header');
+                        const sectionEl = els.find(e => e.tag === 'section');
+                        
+                        title = headerEl?.text?.content || '';
+                        desc = sectionEl?.text?.content || '';
+                        
+                        // Fallback for old schema if present
+                        if(!title && !desc) {
+                             title = els.find(e=>e.element_type==='title')?.title?.text || '';
+                             desc = els.find(e=>e.element_type==='description')?.description?.text || '';
+                        }
                     }
                 } catch(e) {}
 
