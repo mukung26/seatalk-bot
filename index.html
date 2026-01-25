@@ -36,18 +36,7 @@
   "imports": {
     "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
     "react": "https://esm.sh/react@^19.2.3",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "esbuild": "https://esm.sh/esbuild@^0.27.2",
-    "fs": "https://esm.sh/fs@^0.0.1-security",
-    "process": "https://esm.sh/process@^0.11.10",
-    "child_process": "https://esm.sh/child_process@^1.0.2",
-    "url": "https://esm.sh/url@^0.11.4",
-    "path": "https://esm.sh/path@^0.12.7",
-    "node-cache": "https://esm.sh/node-cache@^5.1.2",
-    "axios": "https://esm.sh/axios@^1.13.3",
-    "dotenv": "https://esm.sh/dotenv@^17.2.3",
-    "@modelcontextprotocol/sdk/": "https://esm.sh/@modelcontextprotocol/sdk@^1.25.3/dist/esm/",
-    "zod": "https://esm.sh/zod@^4.3.6"
+    "react/": "https://esm.sh/react@^19.2.3/"
   }
 }
 </script>
@@ -57,21 +46,6 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         const DEFAULT_WORKER_URL = 'https://seatalk-be.jcruspero3263.workers.dev';
-
-        // --- TOOL DEFINITIONS FROM seatalk_server-main/src/tools.ts ---
-        const MCP_TOOLS = [
-            { name: "get_employee_profile", params: '{"employee_code": "EMP123"}' },
-            { name: "get_employee_code_with_email", params: '{"emails": ["user@example.com"]}' },
-            { name: "check_employee_existence", params: '{"id": "ST123"}' },
-            { name: "get_user_language_preference", params: '{"employee_code": "EMP123"}' },
-            { name: "get_joined_group_chat_list", params: '{"page_size": 10}' },
-            { name: "get_thread_by_thread_id", params: '{"group_id": "", "thread_id": ""}' },
-            { name: "get_message_by_message_id", params: '{"message_id": ""}' },
-            { name: "get_chat_history", params: '{"group_id": "", "page_size": 20}' },
-            { name: "get_group_info", params: '{"group_id": ""}' },
-            { name: "send_message_to_group_chat", params: '{"group_id": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' },
-            { name: "send_message_to_bot_user", params: '{"employee_code": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' }
-        ];
 
         // --- TOOLBAR COMPONENT ---
         const Toolbar = ({ insert }) => (
@@ -103,12 +77,6 @@
             const [logs, setLogs] = useState([]);
             const [loading, setLoading] = useState(false);
             const [clock, setClock] = useState('');
-
-            // MCP Inspector State
-            const [selectedTool, setSelectedTool] = useState(MCP_TOOLS[0].name);
-            const [toolArgs, setToolArgs] = useState(MCP_TOOLS[0].params);
-            const [toolResult, setToolResult] = useState(null);
-            const [toolLoading, setToolLoading] = useState(false);
 
             // Inputs
             const [manual, setManual] = useState({ id: '', msg: '', title: '', description: '', type: 'text' });
@@ -192,19 +160,12 @@
                 let payload = manual.msg;
                 
                 if (manual.type === 'interactive') {
-                    // Correct Structure based on MCP Docs/README
                     payload = {
                         tag: "interactive_message",
                         interactive_message: {
                             elements: [
-                                { 
-                                    tag: "header", 
-                                    text: { content: manual.title, tag: "plain_text" } 
-                                },
-                                { 
-                                    tag: "section", 
-                                    text: { content: manual.description, tag: "plain_text" } 
-                                }
+                                { element_type: "title", title: { text: manual.title } },
+                                { element_type: "description", description: { format: 1, text: manual.description } }
                             ]
                         }
                     };
@@ -222,30 +183,6 @@
                 refresh(true);
             };
 
-            // --- MCP TOOL ACTIONS ---
-            const runTool = async () => {
-                setToolLoading(true);
-                setToolResult(null);
-                try {
-                    const args = JSON.parse(toolArgs);
-                    const res = await api('/api/mcp', { 
-                        method: 'POST', 
-                        body: JSON.stringify({ tool: selectedTool, args: args }) 
-                    });
-                    setToolResult(res);
-                } catch(e) {
-                    setToolResult({ error: "Invalid JSON format or Network Error", details: e.message });
-                }
-                setToolLoading(false);
-            };
-
-            const handleToolChange = (e) => {
-                const name = e.target.value;
-                setSelectedTool(name);
-                const toolDef = MCP_TOOLS.find(t => t.name === name);
-                if(toolDef) setToolArgs(toolDef.params);
-            };
-
             const saveTask = async () => {
                 const now = new Date();
                 const t = editing.time || `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
@@ -253,19 +190,12 @@
                 // Construct Payload
                 let finalMsg = editing.message;
                 if (editing.type === 'interactive') {
-                    // Correct Structure based on MCP Docs/README
                     finalMsg = JSON.stringify({
                         tag: "interactive_message",
                         interactive_message: {
                             elements: [
-                                { 
-                                    tag: "header", 
-                                    text: { content: editing.title || "Notification", tag: "plain_text" } 
-                                },
-                                { 
-                                    tag: "section", 
-                                    text: { content: editing.description || "", tag: "plain_text" } 
-                                }
+                                { element_type: "title", title: { text: editing.title || "Notification" } },
+                                { element_type: "description", description: { format: 1, text: editing.description || "" } }
                             ]
                         }
                     });
@@ -301,6 +231,7 @@
             };
             
             const editTask = (t) => {
+                // Deconstruct message if possible
                 let type = 'text';
                 let msg = t.message;
                 let title = '';
@@ -311,10 +242,11 @@
                     if(obj.tag === 'interactive_message') {
                         type = 'interactive';
                         const els = obj.interactive_message?.elements || [];
-                        const headerEl = els.find(e => e.tag === 'header');
-                        const sectionEl = els.find(e => e.tag === 'section');
-                        title = headerEl?.text?.content || '';
-                        desc = sectionEl?.text?.content || '';
+                        title = els.find(e=>e.element_type==='title')?.title?.text || '';
+                        desc = els.find(e=>e.element_type==='description')?.description?.text || '';
+                    } else if (obj.tag === 'image' || obj.tag === 'file') {
+                        // Keep raw for now as user requested simplicity
+                        msg = t.message;
                     }
                 } catch(e) {}
 
@@ -348,7 +280,6 @@
                             <SidebarItem id="console" icon="dvr" label="Console" />
                             <SidebarItem id="chat" icon="chat" label="Live Chat" />
                             <SidebarItem id="cron" icon="schedule" label="Cron Jobs" />
-                            <SidebarItem id="tools" icon="build" label="MCP Inspector" />
                         </div>
                         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 font-mono">
                             <div>CLOCK: {clock}</div>
@@ -495,44 +426,6 @@
                                             disabled={!chatRecipient}
                                         />
                                         <button onClick={sendChat} disabled={!chatRecipient} className="coder-btn primary h-12 w-16">SEND</button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* MCP INSPECTOR */}
-                        {tab === 'tools' && (
-                            <div className="p-4 md:p-8 space-y-6 pt-16 md:pt-8 overflow-y-auto max-w-7xl mx-auto w-full">
-                                <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-4 mb-4">MCP_INSPECTOR</h2>
-                                
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-200px)]">
-                                    {/* Config Column */}
-                                    <div className="coder-card p-4 flex flex-col gap-4">
-                                        <div className="font-bold text-blue-400 border-b border-slate-700 pb-2">REQUEST</div>
-                                        <div>
-                                            <label className="block text-xs text-slate-500 mb-1">SELECT_TOOL</label>
-                                            <select className="coder-input w-full p-2 rounded text-sm" value={selectedTool} onChange={handleToolChange}>
-                                                {MCP_TOOLS.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="flex-1 flex flex-col">
-                                            <label className="block text-xs text-slate-500 mb-1">ARGUMENTS (JSON)</label>
-                                            <textarea className="coder-input w-full flex-1 p-3 font-mono text-xs rounded resize-none" 
-                                                value={toolArgs} 
-                                                onChange={e=>setToolArgs(e.target.value)}
-                                            />
-                                        </div>
-                                        <button onClick={runTool} disabled={toolLoading} className="coder-btn primary h-10 font-bold">
-                                            {toolLoading ? 'RUNNING...' : 'EXECUTE TOOL'}
-                                        </button>
-                                    </div>
-
-                                    {/* Output Column */}
-                                    <div className="coder-card p-4 flex flex-col gap-4 bg-black/50">
-                                        <div className="font-bold text-green-400 border-b border-slate-700 pb-2">RESPONSE</div>
-                                        <div className="flex-1 overflow-auto font-mono text-xs text-slate-300 p-2 border border-slate-800 rounded bg-[#0f172a]">
-                                            {toolResult ? JSON.stringify(toolResult, null, 2) : "// Result will appear here..."}
-                                        </div>
                                     </div>
                                 </div>
                             </div>
