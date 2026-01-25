@@ -279,18 +279,11 @@
                 
                 setLoading(true);
                 try {
-                    let payload;
+                    let messages = [];
 
-                    if (manual.image) {
-                        const fileId = await uploadImage(manual.image);
-                        payload = {
-                            tag: "image",
-                            image: { file_id: fileId }
-                        };
-                        // Note: SeaTalk sends image independently. If there's text, we might need 2 calls.
-                        // For simplicity, if image exists, we send image.
-                    } else if (manual.type === 'interactive') {
-                         payload = {
+                    // 1. Prepare Text Payload
+                    if (manual.type === 'interactive') {
+                        messages.push({
                             tag: "interactive_message",
                             interactive_message: {
                                 elements: [
@@ -298,13 +291,30 @@
                                     { tag: "section", text: { content: manual.description, tag: "plain_text" } }
                                 ]
                             }
-                        };
-                    } else {
-                        if(!manual.msg) throw new Error("Message content required");
-                        payload = manual.msg;
+                        });
+                    } else if (manual.msg) {
+                        messages.push({
+                            tag: "text",
+                            text: { 
+                                format: 1, 
+                                content: manual.msg,
+                                mentioned_list: /@all/i.test(manual.msg) ? ["0"] : undefined 
+                            }
+                        });
                     }
 
-                    const res = await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: payload }) });
+                    // 2. Prepare Image Payload (if any)
+                    if (manual.image) {
+                        const fileId = await uploadImage(manual.image);
+                        messages.push({
+                            tag: "image",
+                            image: { file_id: fileId }
+                        });
+                    }
+
+                    if (messages.length === 0) throw new Error("Please enter a message or paste an image.");
+
+                    const res = await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: messages }) });
                     if(res && res.success) {
                         setManual({ ...manual, msg: '', title: '', description: '', image: null });
                         refresh(true);
@@ -321,19 +331,18 @@
                 if(!chatRecipient) return;
                 
                 try {
-                    let payload;
-                    if(chatImage) {
+                    let messages = [];
+                    if (chatMsg) messages.push({ tag: "text", text: { format: 1, content: chatMsg }});
+                    if (chatImage) {
                         const fileId = await uploadImage(chatImage);
-                        payload = { tag: "image", image: { file_id: fileId } };
-                        setChatImage(null); // Clear after upload setup
-                    } else if (chatMsg) {
-                        payload = chatMsg;
-                        setChatMsg('');
-                    } else {
-                        return; // Nothing to send
+                        messages.push({ tag: "image", image: { file_id: fileId } });
                     }
 
-                    await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: payload }) });
+                    if(messages.length === 0) return;
+
+                    await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: messages }) });
+                    setChatMsg('');
+                    setChatImage(null);
                     refresh(true);
                 } catch(e) {
                     alert("Chat Send Error: " + e.message);
@@ -345,22 +354,11 @@
                 const mainTime = times[0] || "00:00";
 
                 try {
-                    let finalMsg = editing.message;
+                    let messages = [];
 
-                    // Handle Image Task
-                    if (editing.image) {
-                        // Check if it's already a file_id (from previous save) or new base64
-                        if (editing.image.startsWith('data:')) {
-                            const fileId = await uploadImage(editing.image);
-                            finalMsg = JSON.stringify({ tag: "image", image: { file_id: fileId } });
-                        } else {
-                             // Assuming it's already processed or we don't re-upload if not changed? 
-                             // For simplicity, if it's a new task with image, we upload.
-                             // If editing and didn't change image, we might need to store the raw payload.
-                             // Currently, let's assume we re-upload or parse existing JSON payload if not Base64.
-                        }
-                    } else if (editing.type === 'interactive') {
-                        finalMsg = JSON.stringify({
+                    // 1. Text / Interactive Payload
+                    if (editing.type === 'interactive') {
+                         messages.push({
                             tag: "interactive_message",
                             interactive_message: {
                                 elements: [
@@ -369,16 +367,40 @@
                                 ]
                             }
                         });
+                    } else if (editing.message) {
+                        messages.push({
+                            tag: "text",
+                            text: { 
+                                format: 1, 
+                                content: editing.message,
+                                mentioned_list: /@all/i.test(editing.message) ? ["0"] : undefined 
+                            }
+                        });
+                    }
+
+                    // 2. Image Payload
+                    let imageFileId = editing.imageFileId; // existing ID
+                    if (editing.image && editing.image.startsWith('data:')) {
+                        // New image upload
+                        imageFileId = await uploadImage(editing.image);
+                    }
+                    
+                    if (imageFileId) {
+                        messages.push({
+                            tag: "image",
+                            image: { file_id: imageFileId }
+                        });
                     }
 
                     const task = { 
                         ...editing, 
                         time: mainTime, 
                         times: times,   
-                        message: finalMsg,
+                        message: JSON.stringify(messages), // Store array as JSON
                         groupName: groups.find(g=>g.id === editing.groupId)?.name || editing.groupId,
-                        // Don't save base64 string to KV to save space, rely on message payload
-                        image: null 
+                        // Clean up UI-specific fields for storage
+                        image: null, 
+                        imageFileId: imageFileId
                     };
                     
                     const newTasks = [...(config.tasks||[])];
@@ -414,34 +436,45 @@
                     title: '', 
                     type: 'text', 
                     enabled: true,
-                    image: null
+                    image: null,
+                    imageFileId: null
                 });
             };
             
             const editTask = (t) => {
                 let type = 'text';
-                let msg = t.message;
+                let msg = '';
                 let title = '';
                 let desc = '';
-                
-                const times = t.times || [t.time];
+                let imageFileId = t.imageFileId;
 
                 try {
-                    const obj = JSON.parse(t.message);
-                    if(obj.tag === 'interactive_message') {
+                    let parsed = JSON.parse(t.message);
+                    // Handle if stored message is array or single object
+                    if(!Array.isArray(parsed)) parsed = [parsed];
+
+                    // Extract parts
+                    const textPart = parsed.find(p => p.tag === 'text');
+                    const interactivePart = parsed.find(p => p.tag === 'interactive_message');
+                    const imagePart = parsed.find(p => p.tag === 'image');
+
+                    if (interactivePart) {
                         type = 'interactive';
-                        const els = obj.interactive_message?.elements || [];
+                        const els = interactivePart.interactive_message?.elements || [];
                         const headerEl = els.find(e => e.tag === 'header');
                         const sectionEl = els.find(e => e.tag === 'section');
                         title = headerEl?.text?.content || '';
                         desc = sectionEl?.text?.content || '';
-                    } else if (obj.tag === 'image') {
-                        type = 'text'; // Visual fallback
-                        msg = JSON.stringify(obj); // Show raw JSON for image tasks if editing
+                    } else if (textPart) {
+                        msg = textPart.text.content;
+                    }
+
+                    if (imagePart) {
+                        imageFileId = imagePart.image.file_id;
                     }
                 } catch(e) {}
 
-                setEditing({ ...t, type, message: msg, title, description: desc, times });
+                setEditing({ ...t, type, message: msg, title, description: desc, times: t.times || [t.time], image: null, imageFileId });
             }
 
             const addTriggerTime = () => setEditing({...editing, times: [...(editing.times || []), "09:00"]});
@@ -768,6 +801,12 @@
                                             <div className="relative inline-block mb-2">
                                                 <img src={editing.image} className="img-preview" />
                                                 <button onClick={()=>setEditing({...editing, image:null})} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">×</button>
+                                            </div>
+                                        )}
+                                        {editing.imageFileId && !editing.image && (
+                                            <div className="bg-blue-900/20 text-blue-300 p-2 text-xs rounded mb-2 border border-blue-800">
+                                                Image Attached (ID: {editing.imageFileId.substring(0,10)}...) 
+                                                <button onClick={()=>setEditing({...editing, imageFileId:null})} className="ml-2 underline text-red-400">Remove</button>
                                             </div>
                                         )}
                                         <Toolbar insert={(b,a)=>insertText(editorInputRef, (v)=>setEditing({...editing, message:v}), editing.message, b, a)} />
