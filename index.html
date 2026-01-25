@@ -20,6 +20,7 @@
         .coder-btn.primary { background: #2563eb; border-color: #1d4ed8; color: white; }
         .coder-btn.primary:hover { background: #1d4ed8; }
         .coder-btn.danger { background: #7f1d1d; border-color: #991b1b; color: #fecaca; }
+        .coder-btn.danger:hover { background: #991b1b; }
         .coder-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         
         /* Custom Scroll */
@@ -172,6 +173,25 @@
                 const newCfg = { ...config, isRunning: !config.isRunning };
                 setConfig(newCfg);
                 await api('/api/config', { method: 'POST', body: JSON.stringify(newCfg) });
+            };
+
+            const resetSystem = async () => {
+                if(!confirm("WARNING: ALL DATA WILL BE DELETED.\n\nThis includes:\n- All Automation Tasks\n- Chat History\n- System Logs\n- Engine Status\n\nAre you sure?")) return;
+                if(!confirm("Double Check: This cannot be undone. Reset now?")) return;
+
+                setLoading(true);
+                const res = await api('/api/reset', { method: 'POST' });
+                
+                if(res && res.success) {
+                    // Reset Local State
+                    setConfig({ tasks: [], isRunning: false });
+                    setChatHistory([]);
+                    setLogs([]);
+                    alert("System has been reset to defaults.");
+                } else {
+                    alert("Reset failed: " + (res?.error || "Unknown error"));
+                }
+                setLoading(false);
             };
 
             const sendManual = async () => {
@@ -467,6 +487,15 @@
                                                 <span className="text-slate-300 break-all">{l.message}</span>
                                             </div>
                                         ))}
+                                    </div>
+                                </div>
+
+                                {/* Danger Zone */}
+                                <div className="coder-card p-4 border-red-900/50 bg-red-900/10">
+                                    <div className="text-xs text-red-400 uppercase font-bold mb-2">DANGER ZONE</div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm text-red-200">Factory Reset System</span>
+                                        <button onClick={resetSystem} className="coder-btn danger">RESET ALL DATA</button>
                                     </div>
                                 </div>
                             </div>
