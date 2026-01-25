@@ -60,6 +60,7 @@
             const [status, setStatus] = useState({ lastHeartbeat: 'Checking...', kvStatus: 'Checking...' });
             const [clock, setClock] = useState('--:--:--');
             const [loading, setLoading] = useState(false);
+            const [heartbeatStale, setHeartbeatStale] = useState(false);
             
             // Chat/Event Callback State
             const [chatHistory, setChatHistory] = useState([]);
@@ -128,6 +129,14 @@
                     }));
                     if (Array.isArray(chats)) setChatHistory(chats);
                     
+                    // Check heartbeat freshness (basic check against local time or server time)
+                    if (sts.lastHeartbeat && sts.lastHeartbeat.includes(':')) {
+                        // Very rough check: if heartbeat text contains date and time, compare minutes
+                        // Ideally we parse it, but for now assuming if it matches current minute or last minute it is fine.
+                        // Actually, easier to just check if it's "Waiting for Cron..."
+                        setHeartbeatStale(sts.lastHeartbeat === 'Waiting for Cron...' || sts.lastHeartbeat === 'Waiting...');
+                    }
+
                     try {
                         const grp = await apiCall('/api/groups');
                         if(Array.isArray(grp)) setGroups(grp);
@@ -482,7 +491,15 @@
                                                     <span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">dns</span> KV Database</span>
                                                     <span className={`text-xs px-2 py-1 rounded-md font-bold ${status.kvStatus === 'Missing Binding' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{status.kvStatus === 'Missing Binding' ? 'Disconnected / Not Configured' : 'Connected'}</span>
                                                 </div>
-                                                <div className="flex justify-between items-center py-2 border-b border-gray-50"><span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">update</span> Last Heartbeat</span><span className="text-xs font-mono text-gray-600">{status.lastHeartbeat}</span></div>
+                                                <div className="flex justify-between items-center py-2 border-b border-gray-50"><span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">update</span> Last Heartbeat</span><span className={`text-xs font-mono font-bold ${heartbeatStale ? 'text-red-500' : 'text-green-600'}`}>{status.lastHeartbeat}</span></div>
+                                                
+                                                {heartbeatStale && (
+                                                    <div className="bg-red-50 text-red-800 p-2 text-xs rounded border border-red-100">
+                                                        <span className="font-bold block mb-1">⚠️ Automation Not Running?</span>
+                                                        Ensure you added a <strong>Cron Trigger</strong> in Cloudflare (Triggers tab). Set it to <code>* * * * *</code> (every minute).
+                                                    </div>
+                                                )}
+
                                                 <div className="flex gap-2 mt-2">
                                                     <button onClick={runTest} className="flex-1 py-2 text-blue-600 text-sm font-medium hover:bg-blue-50 rounded-lg transition text-left px-2 border border-blue-100 bg-blue-50/50">Run Cron Test →</button>
                                                     <button onClick={viewSystemLogs} className="flex-1 py-2 text-slate-600 text-sm font-medium hover:bg-slate-100 rounded-lg transition text-left px-2 border border-slate-200 bg-white">View System Logs →</button>
