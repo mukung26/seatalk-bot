@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SeaAuto Console</title>
+    <title>SeaAuto</title>
+    <link rel="icon" type="image/png" href="https://cdn-app.seatalk.io/public/seatalk-favicon.ico">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -47,6 +48,21 @@
         const { useState, useEffect, useRef } = React;
         const DEFAULT_WORKER_URL = 'https://seatalk-be.jcruspero3263.workers.dev';
 
+        // --- TOOL DEFINITIONS ---
+        const MCP_TOOLS = [
+            { name: "get_employee_profile", params: '{"employee_code": "EMP123"}' },
+            { name: "get_employee_code_with_email", params: '{"emails": ["user@example.com"]}' },
+            { name: "check_employee_existence", params: '{"id": "ST123"}' },
+            { name: "get_user_language_preference", params: '{"employee_code": "EMP123"}' },
+            { name: "get_joined_group_chat_list", params: '{"page_size": 10}' },
+            { name: "get_thread_by_thread_id", params: '{"group_id": "", "thread_id": ""}' },
+            { name: "get_message_by_message_id", params: '{"message_id": ""}' },
+            { name: "get_chat_history", params: '{"group_id": "", "page_size": 20}' },
+            { name: "get_group_info", params: '{"group_id": ""}' },
+            { name: "send_message_to_group_chat", params: '{"group_id": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' },
+            { name: "send_message_to_bot_user", params: '{"employee_code": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' }
+        ];
+
         // --- TOOLBAR COMPONENT ---
         const Toolbar = ({ insert }) => (
             <div className="flex gap-1 mb-2 bg-slate-800 p-1 rounded border border-slate-700">
@@ -77,6 +93,12 @@
             const [logs, setLogs] = useState([]);
             const [loading, setLoading] = useState(false);
             const [clock, setClock] = useState('');
+
+            // MCP Inspector State
+            const [selectedTool, setSelectedTool] = useState(MCP_TOOLS[0].name);
+            const [toolArgs, setToolArgs] = useState(MCP_TOOLS[0].params);
+            const [toolResult, setToolResult] = useState(null);
+            const [toolLoading, setToolLoading] = useState(false);
 
             // Inputs
             const [manual, setManual] = useState({ id: '', msg: '', title: '', description: '', type: 'text' });
@@ -160,12 +182,19 @@
                 let payload = manual.msg;
                 
                 if (manual.type === 'interactive') {
+                    // Correct Structure based on MCP Docs/README
                     payload = {
                         tag: "interactive_message",
                         interactive_message: {
                             elements: [
-                                { element_type: "title", title: { text: manual.title } },
-                                { element_type: "description", description: { format: 1, text: manual.description } }
+                                { 
+                                    tag: "header", 
+                                    text: { content: manual.title, tag: "plain_text" } 
+                                },
+                                { 
+                                    tag: "section", 
+                                    text: { content: manual.description, tag: "plain_text" } 
+                                }
                             ]
                         }
                     };
@@ -183,10 +212,35 @@
                 refresh(true);
             };
 
+            // --- MCP TOOL ACTIONS ---
+            const runTool = async () => {
+                setToolLoading(true);
+                setToolResult(null);
+                try {
+                    const args = JSON.parse(toolArgs);
+                    const res = await api('/api/mcp', { 
+                        method: 'POST', 
+                        body: JSON.stringify({ tool: selectedTool, args: args }) 
+                    });
+                    setToolResult(res);
+                } catch(e) {
+                    setToolResult({ error: "Invalid JSON format or Network Error", details: e.message });
+                }
+                setToolLoading(false);
+            };
+
+            const handleToolChange = (e) => {
+                const name = e.target.value;
+                setSelectedTool(name);
+                const toolDef = MCP_TOOLS.find(t => t.name === name);
+                if(toolDef) setToolArgs(toolDef.params);
+            };
+
             const saveTask = async () => {
-                const now = new Date();
-                const t = editing.time || `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-                
+                // Ensure times is an array
+                const times = editing.times && editing.times.length > 0 ? editing.times : [editing.time];
+                const mainTime = times[0] || "00:00";
+
                 // Construct Payload
                 let finalMsg = editing.message;
                 if (editing.type === 'interactive') {
@@ -194,8 +248,14 @@
                         tag: "interactive_message",
                         interactive_message: {
                             elements: [
-                                { element_type: "title", title: { text: editing.title || "Notification" } },
-                                { element_type: "description", description: { format: 1, text: editing.description || "" } }
+                                { 
+                                    tag: "header", 
+                                    text: { content: editing.title || "Notification", tag: "plain_text" } 
+                                },
+                                { 
+                                    tag: "section", 
+                                    text: { content: editing.description || "", tag: "plain_text" } 
+                                }
                             ]
                         }
                     });
@@ -203,7 +263,8 @@
 
                 const task = { 
                     ...editing, 
-                    time: t,
+                    time: mainTime, // Keep for backward compatibility
+                    times: times,   // New Array support
                     message: finalMsg,
                     groupName: groups.find(g=>g.id === editing.groupId)?.name || editing.groupId
                 };
@@ -227,31 +288,61 @@
             const createNewTask = () => {
                 const now = new Date();
                 const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-                setEditing({ id: Date.now(), name: 'New_Job', time: currentTime, groupId: '', message: '', description: '', title: '', type: 'text', enabled: true });
+                setEditing({ 
+                    id: Date.now(), 
+                    name: 'New_Job', 
+                    time: currentTime,
+                    times: [currentTime], 
+                    groupId: '', 
+                    message: '', 
+                    description: '', 
+                    title: '', 
+                    type: 'text', 
+                    enabled: true 
+                });
             };
             
             const editTask = (t) => {
-                // Deconstruct message if possible
                 let type = 'text';
                 let msg = t.message;
                 let title = '';
                 let desc = '';
                 
+                // Parse Times
+                const times = t.times || [t.time];
+
                 try {
                     const obj = JSON.parse(t.message);
                     if(obj.tag === 'interactive_message') {
                         type = 'interactive';
                         const els = obj.interactive_message?.elements || [];
-                        title = els.find(e=>e.element_type==='title')?.title?.text || '';
-                        desc = els.find(e=>e.element_type==='description')?.description?.text || '';
-                    } else if (obj.tag === 'image' || obj.tag === 'file') {
-                        // Keep raw for now as user requested simplicity
-                        msg = t.message;
+                        const headerEl = els.find(e => e.tag === 'header');
+                        const sectionEl = els.find(e => e.tag === 'section');
+                        title = headerEl?.text?.content || '';
+                        desc = sectionEl?.text?.content || '';
                     }
                 } catch(e) {}
 
-                setEditing({ ...t, type, message: msg, title, description: desc });
+                setEditing({ ...t, type, message: msg, title, description: desc, times });
             }
+
+            // --- Multi-Trigger Editor Logic ---
+            const addTriggerTime = () => {
+                const now = new Date();
+                const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+                setEditing({...editing, times: [...(editing.times || []), currentTime]});
+            };
+
+            const removeTriggerTime = (idx) => {
+                const newTimes = editing.times.filter((_, i) => i !== idx);
+                setEditing({...editing, times: newTimes});
+            };
+
+            const updateTriggerTime = (idx, val) => {
+                const newTimes = [...editing.times];
+                newTimes[idx] = val;
+                setEditing({...editing, times: newTimes});
+            };
 
             // Components
             const SidebarItem = ({ id, icon, label }) => (
@@ -274,12 +365,13 @@
                     {/* Sidebar */}
                     <div className={`flex-shrink-0 border-r border-slate-700 bg-slate-900 flex flex-col transition-all duration-300 ${sidebarVisible ? 'w-64 pt-12' : 'w-0 overflow-hidden opacity-0'}`}>
                         <div className="p-4 border-b border-slate-700 font-bold text-blue-500 flex items-center gap-2">
-                            <span className="material-icons-outlined">terminal</span> <span>SEAAUTO_V2</span>
+                            <span className="material-icons-outlined">terminal</span> <span>SeaAuto</span>
                         </div>
                         <div className="flex-1 overflow-y-auto">
                             <SidebarItem id="console" icon="dvr" label="Console" />
                             <SidebarItem id="chat" icon="chat" label="Live Chat" />
                             <SidebarItem id="cron" icon="schedule" label="Cron Jobs" />
+                            <SidebarItem id="tools" icon="build" label="MCP Inspector" />
                         </div>
                         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 font-mono">
                             <div>CLOCK: {clock}</div>
@@ -431,6 +523,44 @@
                             </div>
                         )}
 
+                        {/* MCP INSPECTOR */}
+                        {tab === 'tools' && (
+                            <div className="p-4 md:p-8 space-y-6 pt-16 md:pt-8 overflow-y-auto max-w-7xl mx-auto w-full">
+                                <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-4 mb-4">MCP_INSPECTOR</h2>
+                                
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-200px)]">
+                                    {/* Config Column */}
+                                    <div className="coder-card p-4 flex flex-col gap-4">
+                                        <div className="font-bold text-blue-400 border-b border-slate-700 pb-2">REQUEST</div>
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">SELECT_TOOL</label>
+                                            <select className="coder-input w-full p-2 rounded text-sm" value={selectedTool} onChange={handleToolChange}>
+                                                {MCP_TOOLS.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="flex-1 flex flex-col">
+                                            <label className="block text-xs text-slate-500 mb-1">ARGUMENTS (JSON)</label>
+                                            <textarea className="coder-input w-full flex-1 p-3 font-mono text-xs rounded resize-none" 
+                                                value={toolArgs} 
+                                                onChange={e=>setToolArgs(e.target.value)}
+                                            />
+                                        </div>
+                                        <button onClick={runTool} disabled={toolLoading} className="coder-btn primary h-10 font-bold">
+                                            {toolLoading ? 'RUNNING...' : 'EXECUTE TOOL'}
+                                        </button>
+                                    </div>
+
+                                    {/* Output Column */}
+                                    <div className="coder-card p-4 flex flex-col gap-4 bg-black/50">
+                                        <div className="font-bold text-green-400 border-b border-slate-700 pb-2">RESPONSE</div>
+                                        <div className="flex-1 overflow-auto font-mono text-xs text-slate-300 p-2 border border-slate-800 rounded bg-[#0f172a]">
+                                            {toolResult ? JSON.stringify(toolResult, null, 2) : "// Result will appear here..."}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* CRON JOBS */}
                         {tab === 'cron' && (
                             <div className="p-4 md:p-8 space-y-4 pt-16 md:pt-8">
@@ -442,7 +572,7 @@
                                     <table className="w-full text-left text-sm font-mono">
                                         <thead className="bg-slate-800 text-slate-400 border-b border-slate-700">
                                             <tr>
-                                                <th className="p-3">TIME</th>
+                                                <th className="p-3">TRIGGERS</th>
                                                 <th className="p-3">NAME</th>
                                                 <th className="p-3">TARGET</th>
                                                 <th className="p-3">STATUS</th>
@@ -452,7 +582,13 @@
                                         <tbody className="divide-y divide-slate-700">
                                             {config.tasks?.map(t => (
                                                 <tr key={t.id} className="hover:bg-slate-800/50">
-                                                    <td className="p-3 font-bold text-yellow-400">{t.time}</td>
+                                                    <td className="p-3">
+                                                        <div className="flex flex-wrap gap-1">
+                                                            {(t.times || [t.time]).map((tm, idx) => (
+                                                                <span key={idx} className="font-bold text-yellow-400 bg-yellow-900/30 px-1 rounded">{tm}</span>
+                                                            ))}
+                                                        </div>
+                                                    </td>
                                                     <td className="p-3">{t.name}</td>
                                                     <td className="p-3 text-xs text-slate-500">{t.groupName}</td>
                                                     <td className="p-3"><span className={`text-xs px-2 py-0.5 rounded ${t.enabled ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>{t.enabled ? 'ON' : 'OFF'}</span></td>
@@ -474,17 +610,35 @@
                         <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-[100]">
                             <div className="coder-card w-full max-w-lg p-6 space-y-4 bg-[#0f172a] max-h-[90vh] overflow-y-auto">
                                 <div className="text-lg font-bold border-b border-slate-700 pb-2">JOB CONFIG</div>
+                                
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div><label className="block text-xs text-slate-500 mb-1">TRIGGER</label><input type="time" className="coder-input w-full p-2 rounded" value={editing.time} onChange={e=>setEditing({...editing, time:e.target.value})} /></div>
                                     <div><label className="block text-xs text-slate-500 mb-1">JOB_ID</label><input className="coder-input w-full p-2 rounded" value={editing.name} onChange={e=>setEditing({...editing, name:e.target.value})} /></div>
+                                    <div>
+                                        <label className="block text-xs text-slate-500 mb-1">TARGET</label>
+                                        <select className="coder-input w-full p-2 rounded" value={editing.groupId} onChange={e=>setEditing({...editing, groupId:e.target.value})}>
+                                            <option value="">-- Select Group --</option>
+                                            {groups.map(g => <option key={g.id} value={g.id}>{g.name} [{g.id}]</option>)}
+                                        </select>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label className="block text-xs text-slate-500 mb-1">TARGET</label>
-                                    <select className="coder-input w-full p-2 rounded" value={editing.groupId} onChange={e=>setEditing({...editing, groupId:e.target.value})}>
-                                        <option value="">-- Select Group --</option>
-                                        {groups.map(g => <option key={g.id} value={g.id}>{g.name} [{g.id}]</option>)}
-                                    </select>
+
+                                {/* Multi-Trigger Editor */}
+                                <div className="bg-slate-900 p-3 rounded border border-slate-700">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-xs text-slate-400 font-bold">TRIGGERS (24H)</label>
+                                        <button onClick={addTriggerTime} className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded text-slate-200">+ ADD TIME</button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {editing.times && editing.times.map((tm, idx) => (
+                                            <div key={idx} className="flex items-center gap-1 bg-slate-800 p-1 rounded border border-slate-600">
+                                                <input type="time" className="bg-transparent text-white text-xs outline-none" value={tm} onChange={e=>updateTriggerTime(idx, e.target.value)} />
+                                                <button onClick={()=>removeTriggerTime(idx)} className="text-red-400 hover:text-red-300 px-1 text-xs">×</button>
+                                            </div>
+                                        ))}
+                                        {(!editing.times || editing.times.length === 0) && <span className="text-xs text-red-500 italic">No triggers set</span>}
+                                    </div>
                                 </div>
+
                                 <div>
                                     <label className="block text-xs text-slate-500 mb-1">TYPE</label>
                                     <select className="coder-input w-full p-2 rounded" value={editing.type || 'text'} onChange={e=>setEditing({...editing, type:e.target.value})}>
