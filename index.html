@@ -31,12 +31,47 @@
         .toolbar-btn { padding: 4px 8px; border-radius: 3px; font-size: 10px; background: #334155; color: #94a3b8; }
         .toolbar-btn:hover { background: #475569; color: white; }
     </style>
+<script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "esbuild": "https://esm.sh/esbuild@^0.27.2",
+    "fs": "https://esm.sh/fs@^0.0.1-security",
+    "process": "https://esm.sh/process@^0.11.10",
+    "child_process": "https://esm.sh/child_process@^1.0.2",
+    "url": "https://esm.sh/url@^0.11.4",
+    "path": "https://esm.sh/path@^0.12.7",
+    "node-cache": "https://esm.sh/node-cache@^5.1.2",
+    "axios": "https://esm.sh/axios@^1.13.3",
+    "dotenv": "https://esm.sh/dotenv@^17.2.3",
+    "@modelcontextprotocol/sdk/": "https://esm.sh/@modelcontextprotocol/sdk@^1.25.3/dist/esm/",
+    "zod": "https://esm.sh/zod@^4.3.6"
+  }
+}
+</script>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         const DEFAULT_WORKER_URL = 'https://seatalk-be.jcruspero3263.workers.dev';
+
+        // --- TOOL DEFINITIONS FROM seatalk_server-main/src/tools.ts ---
+        const MCP_TOOLS = [
+            { name: "get_employee_profile", params: '{"employee_code": "EMP123"}' },
+            { name: "get_employee_code_with_email", params: '{"emails": ["user@example.com"]}' },
+            { name: "check_employee_existence", params: '{"id": "ST123"}' },
+            { name: "get_user_language_preference", params: '{"employee_code": "EMP123"}' },
+            { name: "get_joined_group_chat_list", params: '{"page_size": 10}' },
+            { name: "get_thread_by_thread_id", params: '{"group_id": "", "thread_id": ""}' },
+            { name: "get_message_by_message_id", params: '{"message_id": ""}' },
+            { name: "get_chat_history", params: '{"group_id": "", "page_size": 20}' },
+            { name: "get_group_info", params: '{"group_id": ""}' },
+            { name: "send_message_to_group_chat", params: '{"group_id": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' },
+            { name: "send_message_to_bot_user", params: '{"employee_code": "", "message": {"tag": "text", "text": {"content": "Hello"}}}' }
+        ];
 
         // --- TOOLBAR COMPONENT ---
         const Toolbar = ({ insert }) => (
@@ -69,11 +104,11 @@
             const [loading, setLoading] = useState(false);
             const [clock, setClock] = useState('');
 
-            // Tools State
-            const [empQuery, setEmpQuery] = useState('');
-            const [empResult, setEmpResult] = useState(null);
-            const [histGroup, setHistGroup] = useState('');
-            const [histResult, setHistResult] = useState(null);
+            // MCP Inspector State
+            const [selectedTool, setSelectedTool] = useState(MCP_TOOLS[0].name);
+            const [toolArgs, setToolArgs] = useState(MCP_TOOLS[0].params);
+            const [toolResult, setToolResult] = useState(null);
+            const [toolLoading, setToolLoading] = useState(false);
 
             // Inputs
             const [manual, setManual] = useState({ id: '', msg: '', title: '', description: '', type: 'text' });
@@ -187,17 +222,28 @@
                 refresh(true);
             };
 
-            // --- TOOL ACTIONS ---
-            const lookupEmployee = async () => {
-                if(!empQuery) return;
-                const res = await api('/api/tools/employee', { method: 'POST', body: JSON.stringify({ query: empQuery.trim() }) });
-                setEmpResult(res);
+            // --- MCP TOOL ACTIONS ---
+            const runTool = async () => {
+                setToolLoading(true);
+                setToolResult(null);
+                try {
+                    const args = JSON.parse(toolArgs);
+                    const res = await api('/api/mcp', { 
+                        method: 'POST', 
+                        body: JSON.stringify({ tool: selectedTool, args: args }) 
+                    });
+                    setToolResult(res);
+                } catch(e) {
+                    setToolResult({ error: "Invalid JSON format or Network Error", details: e.message });
+                }
+                setToolLoading(false);
             };
 
-            const fetchHistory = async () => {
-                if(!histGroup) return;
-                const res = await api('/api/tools/history', { method: 'POST', body: JSON.stringify({ groupId: histGroup }) });
-                setHistResult(res);
+            const handleToolChange = (e) => {
+                const name = e.target.value;
+                setSelectedTool(name);
+                const toolDef = MCP_TOOLS.find(t => t.name === name);
+                if(toolDef) setToolArgs(toolDef.params);
             };
 
             const saveTask = async () => {
@@ -265,18 +311,10 @@
                     if(obj.tag === 'interactive_message') {
                         type = 'interactive';
                         const els = obj.interactive_message?.elements || [];
-                        // Correctly parsing tags based on new structure
                         const headerEl = els.find(e => e.tag === 'header');
                         const sectionEl = els.find(e => e.tag === 'section');
-                        
                         title = headerEl?.text?.content || '';
                         desc = sectionEl?.text?.content || '';
-                        
-                        // Fallback for old schema if present
-                        if(!title && !desc) {
-                             title = els.find(e=>e.element_type==='title')?.title?.text || '';
-                             desc = els.find(e=>e.element_type==='description')?.description?.text || '';
-                        }
                     }
                 } catch(e) {}
 
@@ -310,7 +348,7 @@
                             <SidebarItem id="console" icon="dvr" label="Console" />
                             <SidebarItem id="chat" icon="chat" label="Live Chat" />
                             <SidebarItem id="cron" icon="schedule" label="Cron Jobs" />
-                            <SidebarItem id="tools" icon="build" label="Tools (MCP)" />
+                            <SidebarItem id="tools" icon="build" label="MCP Inspector" />
                         </div>
                         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 font-mono">
                             <div>CLOCK: {clock}</div>
@@ -462,69 +500,39 @@
                             </div>
                         )}
 
-                        {/* TOOLS (MCP) */}
+                        {/* MCP INSPECTOR */}
                         {tab === 'tools' && (
                             <div className="p-4 md:p-8 space-y-6 pt-16 md:pt-8 overflow-y-auto max-w-7xl mx-auto w-full">
-                                <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-4 mb-4">MCP_INTEGRATION_TOOLS</h2>
+                                <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-4 mb-4">MCP_INSPECTOR</h2>
                                 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    {/* Employee Inspector */}
-                                    <div className="coder-card p-4 space-y-4">
-                                        <div className="flex justify-between border-b border-slate-700 pb-2">
-                                            <div className="font-bold text-blue-400">EMPLOYEE_INSPECTOR</div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <input className="coder-input flex-1 p-2 rounded text-sm" placeholder="Email or Code..." value={empQuery} onChange={e=>setEmpQuery(e.target.value)} />
-                                            <button onClick={lookupEmployee} className="coder-btn primary">SEARCH</button>
-                                        </div>
-                                        <div className="h-64 bg-black rounded p-2 overflow-auto font-mono text-xs border border-slate-800 text-green-400">
-                                            {empResult ? JSON.stringify(empResult, null, 2) : "// Result will appear here..."}
-                                        </div>
-                                    </div>
-
-                                    {/* Group History */}
-                                    <div className="coder-card p-4 space-y-4">
-                                        <div className="flex justify-between border-b border-slate-700 pb-2">
-                                            <div className="font-bold text-blue-400">GROUP_ARCHIVES</div>
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <select className="coder-input flex-1 p-2 rounded text-sm" value={histGroup} onChange={e=>setHistGroup(e.target.value)}>
-                                                <option value="">-- Select Group --</option>
-                                                {groups.map(g=><option key={g.id} value={g.id}>{g.name}</option>)}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[calc(100vh-200px)]">
+                                    {/* Config Column */}
+                                    <div className="coder-card p-4 flex flex-col gap-4">
+                                        <div className="font-bold text-blue-400 border-b border-slate-700 pb-2">REQUEST</div>
+                                        <div>
+                                            <label className="block text-xs text-slate-500 mb-1">SELECT_TOOL</label>
+                                            <select className="coder-input w-full p-2 rounded text-sm" value={selectedTool} onChange={handleToolChange}>
+                                                {MCP_TOOLS.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
                                             </select>
-                                            <button onClick={fetchHistory} className="coder-btn primary">FETCH</button>
                                         </div>
-                                        <div className="h-64 bg-black rounded p-2 overflow-auto font-mono text-xs border border-slate-800 text-slate-300">
-                                            {histResult?.messages ? (
-                                                histResult.messages.map((m, i) => (
-                                                    <div key={i} className="mb-2 border-b border-slate-900 pb-1">
-                                                        <span className="text-blue-500">[{new Date(m.created_at * 1000).toLocaleTimeString()}]</span> <span className="font-bold text-slate-200">{m.sender.name}:</span>
-                                                        <div className="pl-4 text-slate-400">{m.text?.plain_text || `[${m.tag}]`}</div>
-                                                    </div>
-                                                ))
-                                            ) : "// Select Group to fetch history..."}
+                                        <div className="flex-1 flex flex-col">
+                                            <label className="block text-xs text-slate-500 mb-1">ARGUMENTS (JSON)</label>
+                                            <textarea className="coder-input w-full flex-1 p-3 font-mono text-xs rounded resize-none" 
+                                                value={toolArgs} 
+                                                onChange={e=>setToolArgs(e.target.value)}
+                                            />
                                         </div>
+                                        <button onClick={runTool} disabled={toolLoading} className="coder-btn primary h-10 font-bold">
+                                            {toolLoading ? 'RUNNING...' : 'EXECUTE TOOL'}
+                                        </button>
                                     </div>
-                                </div>
 
-                                {/* MCP Config Generator */}
-                                <div className="coder-card p-4">
-                                    <div className="font-bold text-slate-400 mb-2">CURSOR_MCP_CONFIG</div>
-                                    <div className="text-xs text-slate-500 mb-2">Copy this configuration into your Cursor MCP settings to enable direct AI integration.</div>
-                                    <div className="bg-black p-4 rounded border border-slate-800 font-mono text-xs text-slate-400 relative group">
-                                        <pre>{JSON.stringify({
-                                            "mcpServers": {
-                                                "seatalk-mcp-server": {
-                                                    "command": "npx",
-                                                    "args": ["-y", "seatalk-mcp-server"],
-                                                    "env": {
-                                                        "SEATALK_APP_ID": "ODQ0MjM4MDQyMjE5",
-                                                        "SEATALK_APP_SECRET": "YOUR_SECRET_HERE"
-                                                    },
-                                                    "disabled": false
-                                                }
-                                            }
-                                        }, null, 2)}</pre>
+                                    {/* Output Column */}
+                                    <div className="coder-card p-4 flex flex-col gap-4 bg-black/50">
+                                        <div className="font-bold text-green-400 border-b border-slate-700 pb-2">RESPONSE</div>
+                                        <div className="flex-1 overflow-auto font-mono text-xs text-slate-300 p-2 border border-slate-800 rounded bg-[#0f172a]">
+                                            {toolResult ? JSON.stringify(toolResult, null, 2) : "// Result will appear here..."}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
