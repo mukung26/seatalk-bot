@@ -181,6 +181,14 @@
                 else if(type === 'email') tag = '<mention-tag target="seatalk://user?email=example@domain.com"/>';
                 insertFormat(tag);
             };
+            
+            // --- Added Key Handler ---
+            const handleKeyDown = (e) => {
+                if ((e.ctrlKey || e.metaKey)) {
+                    if (e.key === 'b') { e.preventDefault(); insertFormat('**', '**'); }
+                    if (e.key === 'i') { e.preventDefault(); insertFormat('*', '*'); }
+                }
+            };
 
             const saveConfig = async (newCfg) => {
                 setConfig(newCfg); 
