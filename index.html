@@ -30,9 +30,9 @@
 <script type="importmap">
 {
   "imports": {
-    "react/": "https://esm.sh/react@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
     "react": "https://esm.sh/react@^19.2.3",
-    "@google/genai": "https://esm.sh/@google/genai@^1.38.0"
+    "react/": "https://esm.sh/react@^19.2.3/"
   }
 }
 </script>
@@ -250,6 +250,31 @@
                 }
             };
 
+            const viewSystemLogs = async () => {
+                setLoading(true);
+                try {
+                    const logs = await apiCall('/api/logs');
+                    setModal({
+                        title: "Worker System Logs",
+                        type: 'info',
+                        content: (
+                            <div className="space-y-0 text-xs font-mono">
+                                {logs.length === 0 ? <p className="text-gray-500 italic p-2">No logs found.</p> : logs.map((l, i) => (
+                                    <div key={i} className={`border-b border-gray-100 py-1.5 flex gap-2 ${l.level === 'ERROR' ? 'bg-red-50 text-red-800 px-1 rounded' : ''}`}>
+                                        <span className="text-gray-400 shrink-0">{new Date(l.time).toLocaleTimeString()}</span>
+                                        <span className={`font-bold shrink-0 w-12 ${l.level === 'ERROR' ? 'text-red-600' : (l.level === 'WARN' ? 'text-amber-600' : 'text-blue-600')}`}>{l.level}</span>
+                                        <span className="text-gray-700 break-all">{l.message}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )
+                    });
+                } catch(e) {
+                    setModal({ title: "Error Fetching Logs", content: e.message, type: 'error' });
+                }
+                setLoading(false);
+            };
+
             const sendManual = async () => {
                 if(!manual.id || !manual.msg) return setModal({ title: "Missing Info", content: "Please select a group and type a message.", type: 'error' });
                 let finalMsg = manual.msg;
@@ -451,7 +476,10 @@
                                             <div className="space-y-4">
                                                 <div className="flex justify-between items-center py-2 border-b border-gray-50"><span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">dns</span> Cloudflare KV</span><span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-md font-bold">OK</span></div>
                                                 <div className="flex justify-between items-center py-2 border-b border-gray-50"><span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">update</span> Last Heartbeat</span><span className="text-xs font-mono text-gray-600">{status.lastHeartbeat}</span></div>
-                                                <button onClick={runTest} className="w-full mt-2 py-2 text-blue-600 text-sm font-medium hover:bg-blue-50 rounded-lg transition text-left px-2">Run Cron Trigger Test →</button>
+                                                <div className="flex gap-2 mt-2">
+                                                    <button onClick={runTest} className="flex-1 py-2 text-blue-600 text-sm font-medium hover:bg-blue-50 rounded-lg transition text-left px-2 border border-blue-100 bg-blue-50/50">Run Cron Test →</button>
+                                                    <button onClick={viewSystemLogs} className="flex-1 py-2 text-slate-600 text-sm font-medium hover:bg-slate-100 rounded-lg transition text-left px-2 border border-slate-200 bg-white">View System Logs →</button>
+                                                </div>
                                             </div>
                                         </div>
                                         
@@ -645,7 +673,7 @@
                                             </div>
                                         </div>
                                     ) : (
-                                        <p className="text-sm text-gray-600 whitespace-pre-wrap">{modal.content}</p>
+                                        typeof modal.content === 'string' ? <p className="text-sm text-gray-600 whitespace-pre-wrap">{modal.content}</p> : modal.content
                                     )}
                                 </div>
                                 <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 flex justify-end">
