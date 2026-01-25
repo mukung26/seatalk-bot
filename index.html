@@ -57,7 +57,7 @@
             // Data State
             const [config, setConfig] = useState({ tasks: [], isRunning: false });
             const [groups, setGroups] = useState([]);
-            const [status, setStatus] = useState({ lastHeartbeat: 'Checking...' });
+            const [status, setStatus] = useState({ lastHeartbeat: 'Checking...', kvStatus: 'Checking...' });
             const [clock, setClock] = useState('--:--:--');
             const [loading, setLoading] = useState(false);
             
@@ -121,7 +121,11 @@
                     ]);
                     
                     setConfig(cfg || { tasks: [], isRunning: false });
-                    setStatus(prev => ({ ...prev, lastHeartbeat: sts.lastHeartbeat }));
+                    setStatus(prev => ({ 
+                        ...prev, 
+                        lastHeartbeat: sts.lastHeartbeat,
+                        kvStatus: sts.kvStatus || 'Unknown'
+                    }));
                     if (Array.isArray(chats)) setChatHistory(chats);
                     
                     try {
@@ -474,7 +478,10 @@
                                         <div className="m3-card p-6">
                                             <h2 className="text-xl font-medium text-gray-800 mb-6">Diagnostics</h2>
                                             <div className="space-y-4">
-                                                <div className="flex justify-between items-center py-2 border-b border-gray-50"><span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">dns</span> Cloudflare KV</span><span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-md font-bold">OK</span></div>
+                                                <div className="flex justify-between items-center py-2 border-b border-gray-50">
+                                                    <span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">dns</span> KV Database</span>
+                                                    <span className={`text-xs px-2 py-1 rounded-md font-bold ${status.kvStatus === 'Missing Binding' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>{status.kvStatus === 'Missing Binding' ? 'Disconnected / Not Configured' : 'Connected'}</span>
+                                                </div>
                                                 <div className="flex justify-between items-center py-2 border-b border-gray-50"><span className="text-sm text-gray-600 flex items-center gap-2"><span className="material-icons-outlined text-sm text-gray-400">update</span> Last Heartbeat</span><span className="text-xs font-mono text-gray-600">{status.lastHeartbeat}</span></div>
                                                 <div className="flex gap-2 mt-2">
                                                     <button onClick={runTest} className="flex-1 py-2 text-blue-600 text-sm font-medium hover:bg-blue-50 rounded-lg transition text-left px-2 border border-blue-100 bg-blue-50/50">Run Cron Test →</button>
