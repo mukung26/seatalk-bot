@@ -181,18 +181,14 @@
             const refresh = async (silent = false) => {
                 if(!token) return;
                 
-                // CRITICAL FIX: If we just wrote data (Save/Delete), DO NOT fetch config for 15s.
-                // This allows Cloudflare KV eventual consistency to catch up.
                 const isRecentWrite = (Date.now() - lastWriteRef.current) < 15000;
                 
                 if(!silent) setLoading(true);
                 
-                // NEW: Use /api/sync to get everything in one request
                 try {
                     const syncData = await api('/api/sync');
                     if (syncData) {
                         if (!isRecentWrite) {
-                            // Only update config if no recent local write
                             if (syncData.config) setConfig(syncData.config);
                         }
                         if (syncData.logs) setLogs(syncData.logs);
@@ -215,9 +211,8 @@
 
             useEffect(() => { 
                 if(token) {
-                    fetchGroups(); // Fetch groups once on load
+                    fetchGroups(); 
                     refresh(); 
-                    // POLLING OPTIMIZATION: Increased to 10s to save quota
                     const i = setInterval(() => refresh(true), 10000); 
                     return () => clearInterval(i); 
                 }
@@ -712,12 +707,24 @@
                                 </div>
 
                                 <div className="coder-card p-4">
-                                    <div className="text-xs font-bold text-slate-500 mb-2">LOGS</div>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <div className="text-xs font-bold text-slate-500">LOGS</div>
+                                        <button onClick={()=>refresh(false)} className="text-xs text-blue-400 hover:text-white flex items-center gap-1">
+                                            <span className="material-icons-outlined text-sm">refresh</span> Refresh
+                                        </button>
+                                    </div>
                                     <div className="h-96 overflow-y-auto font-mono text-xs space-y-1 p-2 bg-black rounded border border-slate-800">
                                         {logs.map((l, i) => (
                                             <div key={i} className="flex gap-2">
                                                 <span className="text-slate-500">[{new Date(l.time).toLocaleTimeString('en-GB', {hour12:false})}]</span>
-                                                <span className={l.level === 'ERROR' ? 'text-red-500' : 'text-green-500'}>{l.level}</span>
+                                                <span className={`font-bold ${
+                                                    l.level === 'ERROR' ? 'text-red-500' : 
+                                                    l.level === 'WARN' ? 'text-yellow-500' : 
+                                                    l.level === 'WEBHOOK' ? 'text-purple-400' :
+                                                    l.level === 'AUTH' ? 'text-orange-400' :
+                                                    l.level === 'CONFIG' ? 'text-blue-400' :
+                                                    'text-green-500'
+                                                }`}>{l.level}</span>
                                                 <span className="text-slate-300 break-all">{l.message}</span>
                                             </div>
                                         ))}
