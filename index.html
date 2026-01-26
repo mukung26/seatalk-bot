@@ -181,13 +181,15 @@
             const refresh = async (silent = false) => {
                 if(!token) return;
                 
-                const isRecentWrite = (Date.now() - lastWriteRef.current) < 15000;
-                
                 if(!silent) setLoading(true);
                 
                 try {
                     const syncData = await api('/api/sync');
                     if (syncData) {
+                        // CRITICAL FIX: Check timestamp AFTER request returns. 
+                        // If user performed an action while request was in flight, do not overwrite.
+                        const isRecentWrite = (Date.now() - lastWriteRef.current) < 15000;
+
                         if (!isRecentWrite) {
                             if (syncData.config) setConfig(syncData.config);
                         }
@@ -559,7 +561,7 @@
                     title: '', 
                     type: 'text', 
                     enabled: true,
-                    image: null,
+                    image: null, 
                     imageFileId: null
                 });
             };
