@@ -172,6 +172,12 @@
                 } catch(e) { console.error(path, e); return null; }
             };
 
+            const fetchGroups = async () => {
+                // Groups rarely change, so we fetch them once or on demand
+                const grp = await api('/api/groups');
+                if(grp && Array.isArray(grp)) setGroups(grp);
+            };
+
             const refresh = async (silent = false) => {
                 if(!token) return;
                 
@@ -181,27 +187,20 @@
                 
                 if(!silent) setLoading(true);
                 
-                const promises = [
-                    api('/api/status'),
-                    api('/api/groups'),
-                    api('/api/chat-history'),
-                    api('/api/logs')
-                ];
-                
-                // Only fetch config if no recent write or explicit manual refresh
-                if (!isRecentWrite || !silent) {
-                    promises.unshift(api('/api/config'));
-                } else {
-                    promises.unshift(Promise.resolve(null)); // Skip config
-                }
+                // NEW: Use /api/sync to get everything in one request
+                try {
+                    const syncData = await api('/api/sync');
+                    if (syncData) {
+                        if (!isRecentWrite) {
+                            // Only update config if no recent local write
+                            if (syncData.config) setConfig(syncData.config);
+                        }
+                        if (syncData.logs) setLogs(syncData.logs);
+                        if (syncData.chatHistory) setChatHistory(syncData.chatHistory);
+                        if (syncData.status) setStatus(syncData.status);
+                    }
+                } catch(e) { console.error("Sync error", e); }
 
-                const [cfg, sts, grp, ch, lg] = await Promise.all(promises);
-                
-                if(cfg) setConfig(cfg);
-                if(sts) setStatus(sts);
-                if(grp && Array.isArray(grp)) setGroups(grp);
-                if(ch && Array.isArray(ch)) setChatHistory(ch);
-                if(lg && Array.isArray(lg)) setLogs(lg);
                 if(!silent) setLoading(false);
             };
 
@@ -216,8 +215,10 @@
 
             useEffect(() => { 
                 if(token) {
+                    fetchGroups(); // Fetch groups once on load
                     refresh(); 
-                    const i = setInterval(() => refresh(true), 5000); 
+                    // POLLING OPTIMIZATION: Increased to 10s to save quota
+                    const i = setInterval(() => refresh(true), 10000); 
                     return () => clearInterval(i); 
                 }
             }, [token]);
