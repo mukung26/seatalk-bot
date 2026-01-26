@@ -173,7 +173,6 @@
             };
 
             const fetchGroups = async () => {
-                // Groups rarely change, so we fetch them once or on demand
                 const grp = await api('/api/groups');
                 if(grp && Array.isArray(grp)) setGroups(grp);
             };
@@ -187,7 +186,6 @@
                     const syncData = await api('/api/sync');
                     if (syncData) {
                         // CRITICAL FIX: Check timestamp AFTER request returns. 
-                        // If user performed an action while request was in flight, do not overwrite.
                         const isRecentWrite = (Date.now() - lastWriteRef.current) < 15000;
 
                         if (!isRecentWrite) {
@@ -266,10 +264,12 @@
 
             // Actions
             const toggleEngine = async () => {
-                const newCfg = { ...config, isRunning: !config.isRunning };
+                const newState = !config.isRunning;
+                const newCfg = { ...config, isRunning: newState, logMessage: newState ? "Engine Started" : "Engine Stopped" };
                 setConfig(newCfg);
                 lastWriteRef.current = Date.now();
                 await api('/api/config', { method: 'POST', body: JSON.stringify(newCfg) });
+                refresh(true);
             };
 
             const resetSystem = async () => {
@@ -308,10 +308,9 @@
 
                 // Optimistic Update
                 const newSaved = [...(config.savedMessages || []), newMessage];
-                const newConfig = { ...config, savedMessages: newSaved };
+                const newConfig = { ...config, savedMessages: newSaved, logMessage: `Saved Template: ${name}` };
                 setConfig(newConfig);
                 
-                // IMPORTANT: Mark write time to block poll overwrite
                 lastWriteRef.current = Date.now();
 
                 try {
@@ -333,7 +332,7 @@
             const deleteTemplate = async (id) => {
                 if(!confirm("Delete this template?")) return;
                 const newSaved = (config.savedMessages || []).filter(s => s.id !== id);
-                const newConfig = { ...config, savedMessages: newSaved };
+                const newConfig = { ...config, savedMessages: newSaved, logMessage: "Deleted Template" };
                 setConfig(newConfig);
                 
                 lastWriteRef.current = Date.now();
@@ -472,6 +471,7 @@
 
                 try {
                     let messages = [];
+                    let logDetails = `Modified Task: ${editing.name}`;
 
                     if (editing.type === 'interactive') {
                          messages.push({
@@ -518,17 +518,24 @@
                     
                     const newTasks = [...(config.tasks||[])];
                     const idx = newTasks.findIndex(x=>x.id === task.id);
-                    if(idx > -1) newTasks[idx] = task; else newTasks.push(task);
+                    if(idx > -1) {
+                         newTasks[idx] = task; 
+                    } else {
+                         newTasks.push(task);
+                         logDetails = `Created New Task: ${task.name}`;
+                    }
                     
-                    const newConfig = { ...config, tasks: newTasks };
+                    const newConfig = { ...config, tasks: newTasks, logMessage: logDetails };
                     setConfig(newConfig); 
                     
                     // IMPORTANT: Mark write time to block poll overwrite
                     lastWriteRef.current = Date.now();
 
-                    await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
+                    const res = await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
+                    if(!res.success) throw new Error(res.error || "Save failed");
                     
                     setEditing(null);
+                    refresh(true); // Force refresh to confirm save
                 } catch(e) {
                     alert("Save Error: " + e.message);
                 }
@@ -537,14 +544,21 @@
             const deleteTask = async (id) => {
                 if(!confirm("Delete automation?")) return;
                 
+                const taskName = config.tasks.find(t=>t.id === id)?.name || "Unknown";
                 const newTasks = config.tasks.filter(t => t.id !== id);
-                const newConfig = { ...config, tasks: newTasks };
+                const newConfig = { ...config, tasks: newTasks, logMessage: `Deleted Task: ${taskName}` };
                 setConfig(newConfig);
                 
                 // IMPORTANT: Mark write time to block poll overwrite
                 lastWriteRef.current = Date.now();
 
-                await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
+                try {
+                    const res = await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
+                    if(!res.success) throw new Error(res.error || "Delete failed");
+                    refresh(true);
+                } catch(e) {
+                    alert(e.message);
+                }
             };
 
             const createNewTask = () => {
@@ -725,6 +739,9 @@
                                                     l.level === 'WEBHOOK' ? 'text-purple-400' :
                                                     l.level === 'AUTH' ? 'text-orange-400' :
                                                     l.level === 'CONFIG' ? 'text-blue-400' :
+                                                    l.level === 'CHAT' ? 'text-pink-400' :
+                                                    l.level === 'SEND' ? 'text-cyan-400' :
+                                                    l.level === 'AUTO' ? 'text-indigo-400' :
                                                     'text-green-500'
                                                 }`}>{l.level}</span>
                                                 <span className="text-slate-300 break-all">{l.message}</span>
