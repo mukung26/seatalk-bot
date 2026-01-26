@@ -38,8 +38,8 @@
 {
   "imports": {
     "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3"
+    "react": "https://esm.sh/react@^19.2.3",
+    "react/": "https://esm.sh/react@^19.2.3/"
   }
 }
 </script>
@@ -150,6 +150,9 @@
             const chatInputRef = useRef(null);
             const editorInputRef = useRef(null);
             const editorDescRef = useRef(null);
+            
+            // Sync Control
+            const lastWriteRef = useRef(0);
 
             // API Wrapper with Auth
             const api = async (path, opts = {}) => {
@@ -171,14 +174,28 @@
 
             const refresh = async (silent = false) => {
                 if(!token) return;
+                
+                // CRITICAL FIX: If we just wrote data (Save/Delete), DO NOT fetch config for 15s.
+                // This allows Cloudflare KV eventual consistency to catch up.
+                const isRecentWrite = (Date.now() - lastWriteRef.current) < 15000;
+                
                 if(!silent) setLoading(true);
-                const [cfg, sts, grp, ch, lg] = await Promise.all([
-                    api('/api/config'),
+                
+                const promises = [
                     api('/api/status'),
                     api('/api/groups'),
                     api('/api/chat-history'),
                     api('/api/logs')
-                ]);
+                ];
+                
+                // Only fetch config if no recent write or explicit manual refresh
+                if (!isRecentWrite || !silent) {
+                    promises.unshift(api('/api/config'));
+                } else {
+                    promises.unshift(Promise.resolve(null)); // Skip config
+                }
+
+                const [cfg, sts, grp, ch, lg] = await Promise.all(promises);
                 
                 if(cfg) setConfig(cfg);
                 if(sts) setStatus(sts);
@@ -253,6 +270,7 @@
             const toggleEngine = async () => {
                 const newCfg = { ...config, isRunning: !config.isRunning };
                 setConfig(newCfg);
+                lastWriteRef.current = Date.now();
                 await api('/api/config', { method: 'POST', body: JSON.stringify(newCfg) });
             };
 
@@ -262,6 +280,7 @@
 
                 setLoading(true);
                 const res = await api('/api/reset', { method: 'POST' });
+                lastWriteRef.current = Date.now();
                 
                 if(res && res.success) {
                     setConfig({ tasks: [], savedMessages: [], isRunning: false });
@@ -286,13 +305,16 @@
                     msg: manual.msg,
                     title: manual.title,
                     description: manual.description,
-                    image: manual.image // Note: storing base64 locally in KV config is okay for small scale, but preferably we'd upload.
+                    image: manual.image
                 };
 
                 // Optimistic Update
                 const newSaved = [...(config.savedMessages || []), newMessage];
                 const newConfig = { ...config, savedMessages: newSaved };
                 setConfig(newConfig);
+                
+                // IMPORTANT: Mark write time to block poll overwrite
+                lastWriteRef.current = Date.now();
 
                 try {
                     await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
@@ -315,6 +337,8 @@
                 const newSaved = (config.savedMessages || []).filter(s => s.id !== id);
                 const newConfig = { ...config, savedMessages: newSaved };
                 setConfig(newConfig);
+                
+                lastWriteRef.current = Date.now();
                 await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
             };
 
@@ -376,7 +400,6 @@
                 try {
                     let messages = [];
 
-                    // 1. Prepare Text Payload
                     if (manual.type === 'interactive') {
                         messages.push({
                             tag: "interactive_message",
@@ -398,7 +421,6 @@
                         });
                     }
 
-                    // 2. Prepare Image Payload (if any)
                     if (manual.image) {
                         const fileId = await uploadImage(manual.image);
                         messages.push({
@@ -453,7 +475,6 @@
                 try {
                     let messages = [];
 
-                    // 1. Text / Interactive Payload
                     if (editing.type === 'interactive') {
                          messages.push({
                             tag: "interactive_message",
@@ -475,7 +496,6 @@
                         });
                     }
 
-                    // 2. Image Payload
                     let imageFileId = editing.imageFileId; 
                     if (editing.image && editing.image.startsWith('data:')) {
                         imageFileId = await uploadImage(editing.image);
@@ -498,37 +518,39 @@
                         imageFileId: imageFileId
                     };
                     
-                    // --- OPTIMISTIC UPDATE (Fix for Can't Add/Edit) ---
                     const newTasks = [...(config.tasks||[])];
                     const idx = newTasks.findIndex(x=>x.id === task.id);
                     if(idx > -1) newTasks[idx] = task; else newTasks.push(task);
                     
                     const newConfig = { ...config, tasks: newTasks };
-                    setConfig(newConfig); // Immediate local update
+                    setConfig(newConfig); 
+                    
+                    // IMPORTANT: Mark write time to block poll overwrite
+                    lastWriteRef.current = Date.now();
 
                     await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
                     
                     setEditing(null);
                 } catch(e) {
                     alert("Save Error: " + e.message);
-                    refresh(true); // Revert on error
                 }
             };
 
             const deleteTask = async (id) => {
                 if(!confirm("Delete automation?")) return;
                 
-                // --- OPTIMISTIC UPDATE ---
                 const newTasks = config.tasks.filter(t => t.id !== id);
                 const newConfig = { ...config, tasks: newTasks };
-                setConfig(newConfig); // Immediate local update
+                setConfig(newConfig);
+                
+                // IMPORTANT: Mark write time to block poll overwrite
+                lastWriteRef.current = Date.now();
 
                 await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
             };
 
             const createNewTask = () => {
                 const now = new Date();
-                // 24H Format
                 const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
                 setEditing({ 
                     id: Date.now(), 
@@ -546,6 +568,7 @@
                 });
             };
             
+            // Fixed edit logic to handle raw strings, single objects, and array objects
             const editTask = (t) => {
                 let type = 'text';
                 let msg = '';
@@ -554,9 +577,28 @@
                 let imageFileId = t.imageFileId;
 
                 try {
-                    let parsed = JSON.parse(t.message);
-                    if(!Array.isArray(parsed)) parsed = [parsed];
+                    let parsed;
+                    // Try parsing as JSON
+                    try { 
+                        parsed = JSON.parse(t.message); 
+                    } catch(e) { 
+                        // If it fails, assume it's just a raw text string from old version
+                        parsed = t.message; 
+                    }
 
+                    // Normalize to Array
+                    if (!Array.isArray(parsed)) {
+                        if (typeof parsed === 'string') {
+                            // It's just a string message
+                            msg = parsed;
+                            parsed = []; // Empty array for standard processing below
+                        } else {
+                            // It's a single object
+                            parsed = [parsed];
+                        }
+                    }
+
+                    // Extract parts from the array
                     const textPart = parsed.find(p => p.tag === 'text');
                     const interactivePart = parsed.find(p => p.tag === 'interactive_message');
                     const imagePart = parsed.find(p => p.tag === 'image');
@@ -575,9 +617,21 @@
                     if (imagePart) {
                         imageFileId = imagePart.image.file_id;
                     }
-                } catch(e) {}
+                } catch(e) {
+                    console.error("Edit Parse Error", e);
+                    msg = t.message || ""; // Absolute fallback
+                }
 
-                setEditing({ ...t, type, message: msg, title, description: desc, times: t.times || [t.time], image: null, imageFileId });
+                setEditing({ 
+                    ...t, 
+                    type, 
+                    message: msg, 
+                    title, 
+                    description: desc, 
+                    times: t.times || [t.time], 
+                    image: null, 
+                    imageFileId 
+                });
             }
 
             const addTriggerTime = () => setEditing({...editing, times: [...(editing.times || []), "09:00"]});
