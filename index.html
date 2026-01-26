@@ -38,8 +38,8 @@
 {
   "imports": {
     "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
-    "react": "https://esm.sh/react@^19.2.3",
-    "react/": "https://esm.sh/react@^19.2.3/"
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3"
   }
 }
 </script>
@@ -129,7 +129,7 @@
             const [sidebarVisible, setSidebarVisible] = useState(true);
             
             // Data
-            const [config, setConfig] = useState({ tasks: [], isRunning: false });
+            const [config, setConfig] = useState({ tasks: [], savedMessages: [], isRunning: false });
             const [status, setStatus] = useState({ lastHeartbeat: '-', kvStatus: '-' });
             const [groups, setGroups] = useState([]);
             const [chatHistory, setChatHistory] = useState([]);
@@ -188,7 +188,7 @@
                 if(!silent) setLoading(false);
             };
 
-            // Clock Logic
+            // Clock Logic (24H)
             useEffect(() => {
                 const tick = setInterval(() => {
                     const now = new Date();
@@ -257,14 +257,14 @@
             };
 
             const resetSystem = async () => {
-                if(!confirm("WARNING: ALL DATA WILL BE DELETED.\n\nThis includes:\n- All Automation Tasks\n- Chat History\n- System Logs\n- Engine Status\n\nAre you sure?")) return;
+                if(!confirm("WARNING: ALL DATA WILL BE DELETED.\n\nThis includes:\n- All Automation Tasks\n- Saved Messages\n- Chat History\n- System Logs\n\nAre you sure?")) return;
                 if(!confirm("Double Check: This cannot be undone. Reset now?")) return;
 
                 setLoading(true);
                 const res = await api('/api/reset', { method: 'POST' });
                 
                 if(res && res.success) {
-                    setConfig({ tasks: [], isRunning: false });
+                    setConfig({ tasks: [], savedMessages: [], isRunning: false });
                     setChatHistory([]);
                     setLogs([]);
                     alert("System has been reset to defaults.");
@@ -274,23 +274,111 @@
                 setLoading(false);
             };
 
+            // --- SAVED MESSAGES ACTIONS ---
+            const saveTemplate = async () => {
+                const name = prompt("Enter a name for this template:");
+                if (!name) return;
+                
+                const newMessage = {
+                    id: Date.now(),
+                    name,
+                    type: manual.type,
+                    msg: manual.msg,
+                    title: manual.title,
+                    description: manual.description,
+                    image: manual.image // Note: storing base64 locally in KV config is okay for small scale, but preferably we'd upload.
+                };
+
+                // Optimistic Update
+                const newSaved = [...(config.savedMessages || []), newMessage];
+                const newConfig = { ...config, savedMessages: newSaved };
+                setConfig(newConfig);
+
+                try {
+                    await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
+                } catch(e) { alert("Failed to save template"); }
+            };
+
+            const loadTemplate = (tpl) => {
+                setManual({
+                    ...manual,
+                    type: tpl.type || 'text',
+                    msg: tpl.msg || '',
+                    title: tpl.title || '',
+                    description: tpl.description || '',
+                    image: tpl.image || null
+                });
+            };
+
+            const deleteTemplate = async (id) => {
+                if(!confirm("Delete this template?")) return;
+                const newSaved = (config.savedMessages || []).filter(s => s.id !== id);
+                const newConfig = { ...config, savedMessages: newSaved };
+                setConfig(newConfig);
+                await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
+            };
+
+            const sendTemplateNow = async (tpl) => {
+                if(!manual.id) return alert("Please select a Target Group first above!");
+                
+                setLoading(true);
+                try {
+                    let messages = [];
+
+                    if (tpl.type === 'interactive') {
+                        messages.push({
+                            tag: "interactive_message",
+                            interactive_message: {
+                                elements: [
+                                    { tag: "header", text: { content: tpl.title, tag: "plain_text" } },
+                                    { tag: "section", text: { content: tpl.description, tag: "plain_text" } }
+                                ]
+                            }
+                        });
+                    } else if (tpl.msg) {
+                        messages.push({
+                            tag: "text",
+                            text: { 
+                                format: 1, 
+                                content: tpl.msg,
+                                mentioned_list: /@all/i.test(tpl.msg) ? ["0"] : undefined 
+                            }
+                        });
+                    }
+
+                    if (tpl.image) {
+                        const fileId = await uploadImage(tpl.image);
+                        messages.push({
+                            tag: "image",
+                            image: { file_id: fileId }
+                        });
+                    }
+
+                    if (messages.length === 0) throw new Error("Empty template");
+
+                    const res = await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: messages }) });
+                    if(res && res.success) {
+                        alert("Template Sent!");
+                        refresh(true);
+                    } else {
+                        alert("Send Failed");
+                    }
+                } catch(e) {
+                    alert(e.message);
+                }
+                setLoading(false);
+            };
+
             const sendManual = async () => {
                 if(!manual.id) return alert("Target Group is required");
                 
                 setLoading(true);
                 try {
-                    let payload;
+                    let messages = [];
 
-                    if (manual.image) {
-                        const fileId = await uploadImage(manual.image);
-                        payload = {
-                            tag: "image",
-                            image: { file_id: fileId }
-                        };
-                        // Note: SeaTalk sends image independently. If there's text, we might need 2 calls.
-                        // For simplicity, if image exists, we send image.
-                    } else if (manual.type === 'interactive') {
-                         payload = {
+                    // 1. Prepare Text Payload
+                    if (manual.type === 'interactive') {
+                        messages.push({
                             tag: "interactive_message",
                             interactive_message: {
                                 elements: [
@@ -298,13 +386,30 @@
                                     { tag: "section", text: { content: manual.description, tag: "plain_text" } }
                                 ]
                             }
-                        };
-                    } else {
-                        if(!manual.msg) throw new Error("Message content required");
-                        payload = manual.msg;
+                        });
+                    } else if (manual.msg) {
+                        messages.push({
+                            tag: "text",
+                            text: { 
+                                format: 1, 
+                                content: manual.msg,
+                                mentioned_list: /@all/i.test(manual.msg) ? ["0"] : undefined 
+                            }
+                        });
                     }
 
-                    const res = await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: payload }) });
+                    // 2. Prepare Image Payload (if any)
+                    if (manual.image) {
+                        const fileId = await uploadImage(manual.image);
+                        messages.push({
+                            tag: "image",
+                            image: { file_id: fileId }
+                        });
+                    }
+
+                    if (messages.length === 0) throw new Error("Please enter a message or paste an image.");
+
+                    const res = await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: manual.id, message: messages }) });
                     if(res && res.success) {
                         setManual({ ...manual, msg: '', title: '', description: '', image: null });
                         refresh(true);
@@ -321,46 +426,36 @@
                 if(!chatRecipient) return;
                 
                 try {
-                    let payload;
-                    if(chatImage) {
+                    let messages = [];
+                    if (chatMsg) messages.push({ tag: "text", text: { format: 1, content: chatMsg }});
+                    if (chatImage) {
                         const fileId = await uploadImage(chatImage);
-                        payload = { tag: "image", image: { file_id: fileId } };
-                        setChatImage(null); // Clear after upload setup
-                    } else if (chatMsg) {
-                        payload = chatMsg;
-                        setChatMsg('');
-                    } else {
-                        return; // Nothing to send
+                        messages.push({ tag: "image", image: { file_id: fileId } });
                     }
 
-                    await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: payload }) });
+                    if(messages.length === 0) return;
+
+                    await api('/api/send', { method: 'POST', body: JSON.stringify({ groupId: chatRecipient, message: messages }) });
+                    setChatMsg('');
+                    setChatImage(null);
                     refresh(true);
                 } catch(e) {
                     alert("Chat Send Error: " + e.message);
                 }
             };
 
+            // --- CRON JOB ACTIONS ---
+
             const saveTask = async () => {
                 const times = editing.times && editing.times.length > 0 ? editing.times : [editing.time];
                 const mainTime = times[0] || "00:00";
 
                 try {
-                    let finalMsg = editing.message;
+                    let messages = [];
 
-                    // Handle Image Task
-                    if (editing.image) {
-                        // Check if it's already a file_id (from previous save) or new base64
-                        if (editing.image.startsWith('data:')) {
-                            const fileId = await uploadImage(editing.image);
-                            finalMsg = JSON.stringify({ tag: "image", image: { file_id: fileId } });
-                        } else {
-                             // Assuming it's already processed or we don't re-upload if not changed? 
-                             // For simplicity, if it's a new task with image, we upload.
-                             // If editing and didn't change image, we might need to store the raw payload.
-                             // Currently, let's assume we re-upload or parse existing JSON payload if not Base64.
-                        }
-                    } else if (editing.type === 'interactive') {
-                        finalMsg = JSON.stringify({
+                    // 1. Text / Interactive Payload
+                    if (editing.type === 'interactive') {
+                         messages.push({
                             tag: "interactive_message",
                             interactive_message: {
                                 elements: [
@@ -369,39 +464,71 @@
                                 ]
                             }
                         });
+                    } else if (editing.message) {
+                        messages.push({
+                            tag: "text",
+                            text: { 
+                                format: 1, 
+                                content: editing.message,
+                                mentioned_list: /@all/i.test(editing.message) ? ["0"] : undefined 
+                            }
+                        });
+                    }
+
+                    // 2. Image Payload
+                    let imageFileId = editing.imageFileId; 
+                    if (editing.image && editing.image.startsWith('data:')) {
+                        imageFileId = await uploadImage(editing.image);
+                    }
+                    
+                    if (imageFileId) {
+                        messages.push({
+                            tag: "image",
+                            image: { file_id: imageFileId }
+                        });
                     }
 
                     const task = { 
                         ...editing, 
                         time: mainTime, 
                         times: times,   
-                        message: finalMsg,
+                        message: JSON.stringify(messages), 
                         groupName: groups.find(g=>g.id === editing.groupId)?.name || editing.groupId,
-                        // Don't save base64 string to KV to save space, rely on message payload
-                        image: null 
+                        image: null, 
+                        imageFileId: imageFileId
                     };
                     
+                    // --- OPTIMISTIC UPDATE (Fix for Can't Add/Edit) ---
                     const newTasks = [...(config.tasks||[])];
                     const idx = newTasks.findIndex(x=>x.id === task.id);
                     if(idx > -1) newTasks[idx] = task; else newTasks.push(task);
                     
-                    await api('/api/config', { method: 'POST', body: JSON.stringify({ ...config, tasks: newTasks }) });
+                    const newConfig = { ...config, tasks: newTasks };
+                    setConfig(newConfig); // Immediate local update
+
+                    await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
+                    
                     setEditing(null);
-                    refresh(true);
                 } catch(e) {
                     alert("Save Error: " + e.message);
+                    refresh(true); // Revert on error
                 }
             };
 
             const deleteTask = async (id) => {
                 if(!confirm("Delete automation?")) return;
+                
+                // --- OPTIMISTIC UPDATE ---
                 const newTasks = config.tasks.filter(t => t.id !== id);
-                await api('/api/config', { method: 'POST', body: JSON.stringify({ ...config, tasks: newTasks }) });
-                refresh(true);
+                const newConfig = { ...config, tasks: newTasks };
+                setConfig(newConfig); // Immediate local update
+
+                await api('/api/config', { method: 'POST', body: JSON.stringify(newConfig) });
             };
 
             const createNewTask = () => {
                 const now = new Date();
+                // 24H Format
                 const currentTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
                 setEditing({ 
                     id: Date.now(), 
@@ -414,34 +541,43 @@
                     title: '', 
                     type: 'text', 
                     enabled: true,
-                    image: null
+                    image: null,
+                    imageFileId: null
                 });
             };
             
             const editTask = (t) => {
                 let type = 'text';
-                let msg = t.message;
+                let msg = '';
                 let title = '';
                 let desc = '';
-                
-                const times = t.times || [t.time];
+                let imageFileId = t.imageFileId;
 
                 try {
-                    const obj = JSON.parse(t.message);
-                    if(obj.tag === 'interactive_message') {
+                    let parsed = JSON.parse(t.message);
+                    if(!Array.isArray(parsed)) parsed = [parsed];
+
+                    const textPart = parsed.find(p => p.tag === 'text');
+                    const interactivePart = parsed.find(p => p.tag === 'interactive_message');
+                    const imagePart = parsed.find(p => p.tag === 'image');
+
+                    if (interactivePart) {
                         type = 'interactive';
-                        const els = obj.interactive_message?.elements || [];
+                        const els = interactivePart.interactive_message?.elements || [];
                         const headerEl = els.find(e => e.tag === 'header');
                         const sectionEl = els.find(e => e.tag === 'section');
                         title = headerEl?.text?.content || '';
                         desc = sectionEl?.text?.content || '';
-                    } else if (obj.tag === 'image') {
-                        type = 'text'; // Visual fallback
-                        msg = JSON.stringify(obj); // Show raw JSON for image tasks if editing
+                    } else if (textPart) {
+                        msg = textPart.text.content;
+                    }
+
+                    if (imagePart) {
+                        imageFileId = imagePart.image.file_id;
                     }
                 } catch(e) {}
 
-                setEditing({ ...t, type, message: msg, title, description: desc, times });
+                setEditing({ ...t, type, message: msg, title, description: desc, times: t.times || [t.time], image: null, imageFileId });
             }
 
             const addTriggerTime = () => setEditing({...editing, times: [...(editing.times || []), "09:00"]});
@@ -485,6 +621,7 @@
                         </div>
                         <div className="flex-1 overflow-y-auto">
                             <SidebarItem id="console" icon="dvr" label="Console" />
+                            <SidebarItem id="quick_send" icon="send" label="Quick Send" />
                             <SidebarItem id="chat" icon="chat" label="Live Chat" />
                             <SidebarItem id="cron" icon="schedule" label="Cron Jobs" />
                         </div>
@@ -519,11 +656,38 @@
                                     </div>
                                 </div>
 
-                                <div className="coder-card p-6">
-                                    <div className="text-sm font-bold text-blue-400 mb-4 border-b border-slate-700 pb-2 flex justify-between">
-                                        <span>QUICK_SEND</span>
+                                <div className="coder-card p-4">
+                                    <div className="text-xs font-bold text-slate-500 mb-2">LOGS</div>
+                                    <div className="h-96 overflow-y-auto font-mono text-xs space-y-1 p-2 bg-black rounded border border-slate-800">
+                                        {logs.map((l, i) => (
+                                            <div key={i} className="flex gap-2">
+                                                <span className="text-slate-500">[{new Date(l.time).toLocaleTimeString('en-GB', {hour12:false})}]</span>
+                                                <span className={l.level === 'ERROR' ? 'text-red-500' : 'text-green-500'}>{l.level}</span>
+                                                <span className="text-slate-300 break-all">{l.message}</span>
+                                            </div>
+                                        ))}
                                     </div>
-                                    <div className="space-y-4">
+                                </div>
+
+                                <div className="coder-card p-4 border-red-900/50 bg-red-900/10">
+                                    <div className="text-xs text-red-400 uppercase font-bold mb-2">DANGER ZONE</div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm text-red-200">Factory Reset System</span>
+                                        <button onClick={resetSystem} className="coder-btn danger">RESET ALL DATA</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* QUICK SEND (NEW TAB) */}
+                        {tab === 'quick_send' && (
+                            <div className="p-4 md:p-8 space-y-6 overflow-y-auto max-w-7xl mx-auto w-full pt-16 md:pt-8">
+                                <h2 className="text-xl font-bold text-slate-200 border-b border-slate-700 pb-2">QUICK SEND</h2>
+                                
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    {/* Sender Form */}
+                                    <div className="coder-card p-6 space-y-4">
+                                        <div className="text-sm font-bold text-blue-400 border-b border-slate-700 pb-2">COMPOSER</div>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-xs text-slate-500 mb-1">TARGET_GROUP</label>
@@ -573,33 +737,45 @@
                                             </div>
                                         )}
 
-                                        <div className="flex justify-end">
+                                        <div className="flex justify-between items-center pt-2">
+                                            <button onClick={saveTemplate} className="text-xs text-blue-400 hover:text-blue-300 underline">+ Save as Template</button>
                                             <button onClick={sendManual} disabled={loading} className="coder-btn primary">
-                                                <span className="material-icons-outlined text-sm">send</span> {loading ? 'SENDING...' : 'EXECUTE'}
+                                                <span className="material-icons-outlined text-sm">send</span> {loading ? 'SENDING...' : 'SEND NOW'}
                                             </button>
                                         </div>
                                     </div>
-                                </div>
 
-                                <div className="coder-card p-4">
-                                    <div className="text-xs font-bold text-slate-500 mb-2">LOGS</div>
-                                    <div className="h-48 overflow-y-auto font-mono text-xs space-y-1 p-2 bg-black rounded border border-slate-800">
-                                        {logs.map((l, i) => (
-                                            <div key={i} className="flex gap-2">
-                                                <span className="text-slate-500">[{new Date(l.time).toLocaleTimeString()}]</span>
-                                                <span className={l.level === 'ERROR' ? 'text-red-500' : 'text-green-500'}>{l.level}</span>
-                                                <span className="text-slate-300 break-all">{l.message}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                {/* Danger Zone */}
-                                <div className="coder-card p-4 border-red-900/50 bg-red-900/10">
-                                    <div className="text-xs text-red-400 uppercase font-bold mb-2">DANGER ZONE</div>
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-sm text-red-200">Factory Reset System</span>
-                                        <button onClick={resetSystem} className="coder-btn danger">RESET ALL DATA</button>
+                                    {/* Saved Messages */}
+                                    <div className="coder-card p-6 space-y-4">
+                                        <div className="text-sm font-bold text-green-400 border-b border-slate-700 pb-2">SAVED TEMPLATES</div>
+                                        <div className="space-y-3 h-[400px] overflow-y-auto pr-2">
+                                            {config.savedMessages && config.savedMessages.length > 0 ? (
+                                                config.savedMessages.map(s => (
+                                                    <div key={s.id} className="bg-slate-900 border border-slate-700 p-3 rounded hover:border-slate-500 transition-colors">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <div className="font-bold text-sm text-white">{s.name}</div>
+                                                            <div className="text-[10px] uppercase bg-slate-800 px-1 rounded text-slate-400">{s.type}</div>
+                                                        </div>
+                                                        <div className="text-xs text-slate-400 truncate mb-3">
+                                                            {s.type === 'interactive' ? s.title : s.msg}
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button onClick={()=>sendTemplateNow(s)} disabled={loading} className="flex-1 bg-green-900/50 hover:bg-green-900 text-green-300 text-xs py-1 rounded border border-green-800 text-center">
+                                                                SEND NOW
+                                                            </button>
+                                                            <button onClick={()=>loadTemplate(s)} className="coder-btn text-xs px-2" title="Load to Editor">
+                                                                <span className="material-icons-outlined text-sm">edit</span>
+                                                            </button>
+                                                            <button onClick={()=>deleteTemplate(s.id)} className="coder-btn text-xs px-2 text-red-400" title="Delete">
+                                                                <span className="material-icons-outlined text-sm">delete</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <div className="text-slate-500 text-sm text-center italic mt-10">No saved templates</div>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -625,7 +801,7 @@
                                             <div className="text-[10px] text-slate-500 mb-1 flex gap-2 font-mono">
                                                 <span className="text-blue-400 font-bold">{msg.senderName}</span>
                                                 <span>&lt;{msg.senderEmail || 'N/A'}&gt;</span>
-                                                <span>{new Date(msg.time).toLocaleTimeString()}</span>
+                                                <span>{new Date(msg.time).toLocaleTimeString('en-GB', {hour12:false})}</span>
                                             </div>
                                             <div 
                                                 onClick={() => {
@@ -674,7 +850,7 @@
                                     <table className="w-full text-left text-sm font-mono">
                                         <thead className="bg-slate-800 text-slate-400 border-b border-slate-700">
                                             <tr>
-                                                <th className="p-3">TRIGGERS</th>
+                                                <th className="p-3">TRIGGERS (24H)</th>
                                                 <th className="p-3">NAME</th>
                                                 <th className="p-3">TARGET</th>
                                                 <th className="p-3">STATUS</th>
@@ -768,6 +944,12 @@
                                             <div className="relative inline-block mb-2">
                                                 <img src={editing.image} className="img-preview" />
                                                 <button onClick={()=>setEditing({...editing, image:null})} className="absolute top-0 right-0 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">×</button>
+                                            </div>
+                                        )}
+                                        {editing.imageFileId && !editing.image && (
+                                            <div className="bg-blue-900/20 text-blue-300 p-2 text-xs rounded mb-2 border border-blue-800">
+                                                Image Attached (ID: {editing.imageFileId.substring(0,10)}...) 
+                                                <button onClick={()=>setEditing({...editing, imageFileId:null})} className="ml-2 underline text-red-400">Remove</button>
                                             </div>
                                         )}
                                         <Toolbar insert={(b,a)=>insertText(editorInputRef, (v)=>setEditing({...editing, message:v}), editing.message, b, a)} />
